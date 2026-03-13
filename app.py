@@ -774,16 +774,54 @@ _PRO_MODELS = [
     "gemini-1.5-pro",
     "gemini-1.5-flash",
 ]
-_ALL_MODELS_LABELS = {
-    "auto":                          "🤖 Auto (consigliato)",
-    "gemini-2.5-pro-preview-05-06":  "🧠 Gemini 2.5 Pro (lento, migliore)",
-    "gemini-2.0-flash":              "⚡ Gemini 2.0 Flash (veloce)",
-    "gemini-2.0-flash-lite":         "🚀 Gemini 2.0 Flash Lite (più veloce)",
-    "gemini-1.5-flash":              "💨 Gemini 1.5 Flash (fallback)",
-    "gemini-1.5-pro":                "📚 Gemini 1.5 Pro",
-    "grok-3-fast":                   "⚡ Grok 3 Fast (se key xAI)",
-    "grok-3":                        "🧠 Grok 3 (se key xAI)",
-}
+# Costruisce lista modelli disponibili via autodiscovery
+def _discover_available_models() -> dict:
+    """Scopre i modelli disponibili e ritorna dict {id: label}."""
+    found = {"auto": "🤖 Auto (consigliato)"}
+    if _ai_sdk_mode == "new":
+        try:
+            discovered = []
+            for m in _ai_client.models.list():
+                name = m.name.replace("models/", "")
+                if "gemini" in name and "embedding" not in name and "aqa" not in name:
+                    discovered.append(name)
+        except Exception:
+            discovered = []
+        # Unisci con statica
+        static = [
+            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-pro-preview-03-25",
+            "gemini-2.5-flash-preview",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-8b",
+        ]
+        all_models = list(dict.fromkeys(static + discovered))  # dedup, mantieni ordine
+        icons = {"2.5-pro": "🧠", "2.5-flash": "⚡", "2.0-flash-lite": "🚀",
+                 "2.0-flash": "⚡", "1.5-pro": "📚", "1.5-flash": "💨"}
+        for m in all_models:
+            icon = next((v for k,v in icons.items() if k in m), "🔷")
+            found[m] = f"{icon} {m}"
+    elif _ai_sdk_mode == "old":
+        try:
+            for m in _ai_client.list_models():
+                if "generateContent" in m.supported_generation_methods:
+                    name = m.name.replace("models/", "")
+                    if "gemini" in name:
+                        found[name] = f"🔷 {name}"
+        except Exception:
+            for m in ["gemini-1.5-flash","gemini-1.5-pro","gemini-1.5-flash-8b"]:
+                found[m] = f"🔷 {m}"
+    elif _ai_sdk_mode == "grok":
+        for m in ["grok-3","grok-3-fast","grok-3-mini","grok-2-1212"]:
+            icons = {"grok-3-fast":"⚡","grok-3-mini":"🚀"}
+            found[m] = f"{icons.get(m,'🧠')} {m}"
+    return found
+
+_ALL_MODELS_LABELS = _discover_available_models()
 
 def _is_quota_error(e) -> bool:
     s = str(e).lower()
@@ -891,27 +929,30 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    nav_html = '<div class="bottom-nav">'
+    """Bottom nav via query param — nessun pulsante visibile."""
+    cur = st.session_state.mob_menu
+    # Leggi click dalla query param ?nav=xxx impostata dal JS onclick
+    _nav_req = st.query_params.get("nav", "")
+    if _nav_req and _nav_req != cur:
+        st.session_state.mob_menu = _nav_req
+        st.session_state.selected_act_id = None
+        st.query_params.clear()
+        st.rerun()
+
+    items_html = ""
     for key, icon, label in NAV_ITEMS:
-        active = "active" if st.session_state.mob_menu == key else ""
-        nav_html += (
-            f'<div class="nav-item {active}" onclick="">'
+        active_cls = "active" if cur == key else ""
+        # onclick imposta ?nav=key e ricarica — funziona su mobile senza JS bloccato
+        items_html += (
+            f'<a class="nav-item {active_cls}" href="?nav={key}" target="_self">' 
             f'<span class="nav-icon">{icon}</span>'
             f'<span class="nav-label">{label}</span>'
-            f'</div>'
+            f'</a>'
         )
-    nav_html += '</div>'
-    st.markdown(nav_html, unsafe_allow_html=True)
-
-    # Pulsanti reali (invisibili sotto la nav bar per catturare i click)
-    cols = st.columns(5)
-    for i, (key, icon, label) in enumerate(NAV_ITEMS):
-        with cols[i]:
-            if st.button(f"{icon}", key=f"nav_{key}", use_container_width=True,
-                         help=label, type="secondary"):
-                st.session_state.mob_menu = key
-                st.session_state.selected_act_id = None
-                st.rerun()
+    st.markdown(
+        f'<div class="bottom-nav">{items_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # LOGIN PAGE
@@ -1143,28 +1184,80 @@ if st.session_state.selected_act_id is not None:
                     st_folium(mobj, width=None, height=220, key="det_map")
                     st.markdown('</div>', unsafe_allow_html=True)
 
-        # Zone FC
-        st.markdown("""<div class="mob-card">
-        <div class="mob-card-title">❤️ Zone FC</div>""", unsafe_allow_html=True)
+        # Zone FC — stile Garmin con barre orizzontali
         hr_avg = row.get("average_heartrate")
-        fc_max = u["fc_max"]
-        _hr_zones = [(1,"#4CAF50","Z1",0.00,0.60),(2,"#8BC34A","Z2",0.60,0.70),
-                     (3,"#FFC107","Z3",0.70,0.80),(4,"#FF9800","Z4",0.80,0.90),
-                     (5,"#F44336","Z5",0.90,1.00)]
-        _hz = st.columns(5)
-        for _zi, (_zn,_zc,_zl,_zlo,_zhi) in enumerate(_hr_zones):
-            _blo, _bhi = int(fc_max*_zlo), int(fc_max*_zhi)
-            _cur = pd.notna(hr_avg) and fc_max>0 and _zlo <= hr_avg/fc_max < _zhi
-            _bg  = "20" if _cur else "0a"
-            _brd = "3" if _cur else "1"
-            _active = f"<div style='font-size:9px;font-weight:900;color:{_zc}'>← qui</div>" if _cur else ""
-            _hz[_zi].markdown(
-                f"<div style='background:{_zc}{_bg};border:{_brd}px solid {_zc}cc;"
-                f"border-radius:8px;padding:6px 4px;text-align:center'>"
-                f"<div style='font-size:10px;font-weight:700;color:{_zc}'>{_zl}</div>"
-                f"<div style='font-size:9px;color:#444'>{_blo}–{_bhi}</div>"
-                f"{_active}</div>",
-                unsafe_allow_html=True)
+        fc_max_u = u["fc_max"]
+        _dur_fc = float(row.get("moving_time", 0))
+        _fc_zones_def = [
+            (5, "#F44336", "Zona 5 · Massima",  0.90, 1.00, "Sforzo massimo"),
+            (4, "#FF9800", "Zona 4 · Soglia",    0.80, 0.90, "Soglia anaerobica"),
+            (3, "#FFC107", "Zona 3 · Aerobico",  0.70, 0.80, "Resistenza aerobica"),
+            (2, "#8BC34A", "Zona 2 · Facile",    0.60, 0.70, "Base aerobica"),
+            (1, "#4CAF50", "Zona 1 · Riscaldamento", 0.00, 0.60, "Recupero attivo"),
+        ]
+
+        # Stima distribuzione FC
+        def _fc_time_est(zlo, zhi, hr_pct, dur):
+            if hr_pct is None: return 0.20
+            mid = (zlo + zhi) / 2
+            dist = abs(hr_pct - mid)
+            if zlo <= hr_pct < zhi: return 0.60
+            if dist < 0.08: return 0.18
+            if dist < 0.15: return 0.10
+            if dist < 0.25: return 0.05
+            return 0.02
+
+        _hr_pct = (hr_avg / fc_max_u) if pd.notna(hr_avg) and fc_max_u > 0 else None
+        _fc_raw  = [_fc_time_est(zlo, zhi, _hr_pct, _dur_fc)
+                    for (_,_,_,zlo,zhi,_) in _fc_zones_def]
+        _fc_tot  = sum(_fc_raw) or 1
+        _fc_pcts = [r / _fc_tot for r in _fc_raw]
+        _fc_times= [p * _dur_fc for p in _fc_pcts]
+
+        # Trova zona attiva
+        _fc_cur_idx = None
+        if _hr_pct is not None:
+            for _i, (_,_,_,zlo,zhi,_) in enumerate(_fc_zones_def):
+                if zlo <= _hr_pct < zhi:
+                    _fc_cur_idx = _i
+                    break
+
+        st.markdown('<div class="mob-card"><div class="mob-card-title">&#10084;&#65039; Zone Frequenza Cardiaca</div>',
+                    unsafe_allow_html=True)
+        _fc_html = ""
+        for _i, (_zn, _zc, _zlabel, _zlo, _zhi, _zdesc) in enumerate(_fc_zones_def):
+            _blo = int(fc_max_u * _zlo)
+            _bhi = int(fc_max_u * _zhi) if _zhi < 1.0 else fc_max_u
+            _pct  = _fc_pcts[_i]
+            _tsec = _fc_times[_i]
+            _tmin = int(_tsec // 60)
+            _tsec2= int(_tsec % 60)
+            _tstr = f"{_tmin}:{_tsec2:02d}"
+            _bar_w= max(2, int(_pct * 100))
+            _is_cur = (_i == _fc_cur_idx)
+            _bg   = f"{_zc}18" if _is_cur else "transparent"
+            _brd  = f"border-left:3px solid {_zc};" if _is_cur else "border-left:3px solid transparent;"
+            _fc_html += f"""
+            <div style="padding:8px 4px;{_brd}background:{_bg};border-radius:0 8px 8px 0;margin:2px 0">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">
+                <div>
+                  <span style="font-size:13px;font-weight:700;color:{_zc}">{_zlabel}</span>
+                  <span style="font-size:10px;color:#aaa;margin-left:6px">{_blo}&#8211;{_bhi} bpm</span>
+                </div>
+                <div style="display:flex;gap:12px;align-items:baseline">
+                  <span style="font-size:13px;font-weight:700;color:#333">{_tstr}</span>
+                  <span style="font-size:12px;color:#888;min-width:32px;text-align:right">{_pct*100:.0f}%</span>
+                </div>
+              </div>
+              <div style="background:#f0f0f0;border-radius:4px;height:6px;overflow:hidden">
+                <div style="background:{_zc};width:{_bar_w}%;height:6px;border-radius:4px"></div>
+              </div>
+            </div>"""
+        if pd.notna(hr_avg):
+            _fc_html += (f'<div style="font-size:11px;color:#888;margin-top:6px;padding:0 4px">'
+                         f'FC media: <b style="color:#333">{hr_avg:.0f} bpm</b> '
+                         f'({_hr_pct*100:.0f}% FCmax)</div>' if _hr_pct else "")
+        st.markdown(_fc_html, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
         # ── Zone Potenza (stile Garmin — barre orizzontali) ──
@@ -1294,48 +1387,58 @@ if st.session_state.mob_menu == "dashboard":
     else:
         _ctl_7d = _atl_7d = _tsb_7d = None
 
-    def _delta_str(cur, old):
-        if old is None: return ""
-        d = cur - old
-        arrow = "↑" if d > 0.5 else "↓" if d < -0.5 else "→"
-        col = "#4CAF50" if d > 0.5 else "#F44336" if d < -0.5 else "#888"
-        return f"<span style='font-size:11px;color:{col}'>{arrow}{abs(d):.0f} vs 7gg fa</span>"
-
-    # ── Metriche CTL / ATL / TSB ──
+    # ── Metriche CTL / ATL / TSB ── pre-calcola tutto prima della f-string ──
     ctl_color = "#4CAF50" if current_ctl > 60 else "#FF9800" if current_ctl > 40 else "#F44336"
     tsb_color = "#4CAF50" if current_tsb > 5 else "#FF9800" if current_tsb > -15 else "#F44336"
     atl_color = "#FF9800" if current_atl > current_ctl * 1.1 else "#4CAF50"
 
-    st.markdown(f"""<div class="mob-card">
-    <div class="mob-card-title">📈 Stato Forma · <span style="font-weight:400">{status_label}</span></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:8px 0">
+    def _mk_delta(cur, old):
+        if old is None: return ""
+        d = cur - old
+        arrow = "&#8593;" if d > 0.5 else "&#8595;" if d < -0.5 else "&#8594;"
+        col = "#4CAF50" if d > 0.5 else "#F44336" if d < -0.5 else "#888"
+        return f'<span style="font-size:11px;color:{col}">{arrow}{abs(d):.0f} vs 7gg</span>'
 
-      <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
-        <div style="font-size:32px;font-weight:900;color:{ctl_color};line-height:1">{current_ctl:.0f}</div>
-        <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">CTL · Fitness</div>
-        <div style="font-size:10px;color:#888;line-height:1.3">Forma cronica<br>42 giorni</div>
-        {_delta_str(current_ctl, _ctl_7d)}
-      </div>
+    _d_ctl = _mk_delta(current_ctl, _ctl_7d)
+    _d_tsb = _mk_delta(current_tsb, _tsb_7d)
+    _d_atl = _mk_delta(current_atl, _atl_7d)
 
-      <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
-        <div style="font-size:32px;font-weight:900;color:{tsb_color};line-height:1">{current_tsb:+.0f}</div>
-        <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">TSB · Forma</div>
-        <div style="font-size:10px;color:#888;line-height:1.3">&gt;5 fresco<br>&lt;-20 stanco</div>
-        {_delta_str(current_tsb, _tsb_7d)}
-      </div>
+    _last7 = df[df["start_date"] >= df["start_date"].max() - pd.Timedelta(days=7)]
+    _tss7  = f"{_last7['tss'].sum():.0f}"
+    _n7    = str(len(_last7))
 
-      <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
-        <div style="font-size:32px;font-weight:900;color:{atl_color};line-height:1">{current_atl:.0f}</div>
-        <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">ATL · Fatica</div>
-        <div style="font-size:10px;color:#888;line-height:1.3">Carico acuto<br>7 giorni</div>
-        {_delta_str(current_atl, _atl_7d)}
-      </div>
-    </div>
-    <div style="font-size:11px;color:#aaa;text-align:center;padding:4px 0">
-      TSS ultimi 7gg: <b style="color:#555">{df[df["start_date"] >= df["start_date"].max()-pd.Timedelta(days=7)]["tss"].sum():.0f}</b>
-      · attività: <b style="color:#555">{len(df[df["start_date"] >= df["start_date"].max()-pd.Timedelta(days=7)])}</b>
-    </div>
-    </div>""", unsafe_allow_html=True)
+    _ctl_val = f"{current_ctl:.0f}"
+    _tsb_val = f"{current_tsb:+.0f}"
+    _atl_val = f"{current_atl:.0f}"
+
+    st.markdown(
+        f'''<div class="mob-card">
+        <div class="mob-card-title">&#128200; Stato Forma &middot; <span style="font-weight:400">{status_label}</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:8px 0">
+          <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
+            <div style="font-size:32px;font-weight:900;color:{ctl_color};line-height:1">{_ctl_val}</div>
+            <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">CTL &middot; Fitness</div>
+            <div style="font-size:10px;color:#888;line-height:1.3">Forma cronica<br>42 giorni</div>
+            {_d_ctl}
+          </div>
+          <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
+            <div style="font-size:32px;font-weight:900;color:{tsb_color};line-height:1">{_tsb_val}</div>
+            <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">TSB &middot; Forma</div>
+            <div style="font-size:10px;color:#888;line-height:1.3">&gt;5 fresco &lt;-20 stanco</div>
+            {_d_tsb}
+          </div>
+          <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
+            <div style="font-size:32px;font-weight:900;color:{atl_color};line-height:1">{_atl_val}</div>
+            <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">ATL &middot; Fatica</div>
+            <div style="font-size:10px;color:#888;line-height:1.3">Carico acuto<br>7 giorni</div>
+            {_d_atl}
+          </div>
+        </div>
+        <div style="font-size:11px;color:#aaa;text-align:center;padding:4px 0">
+          TSS ultimi 7gg: <b style="color:#555">{_tss7}</b> &middot; attivit&agrave;: <b style="color:#555">{_n7}</b>
+        </div>
+        </div>''',
+        unsafe_allow_html=True)
 
     # ── Grafico fitness 30gg ──
     st.markdown('<div class="mob-card"><div class="mob-card-title">📊 Fitness ultimi 30 giorni</div>',
@@ -1364,94 +1467,76 @@ if st.session_state.mob_menu == "dashboard":
     st.plotly_chart(fig, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Ultima attività ──
-    s   = get_sport_info(last_act["type"], last_act.get("name",""))
-    m   = format_metrics(last_act)
-    z_n, z_c, z_l = get_zone_for_activity(last_act, u["fc_max"])
-    _act_id = last_act.get("id", last_act.name)
+    # ── Ultime 5 attività — card complete con mappa della prima ──
+    st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 4px;color:#1a1a1a">🏅 Ultime attività</h4></div>',
+                unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div class="act-card" style="border-left-color:{s['color']}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div>
-            <div class="mob-card-title">🕐 Ultima Attività</div>
-            <div class="act-title">{s['icon']} {last_act['name']}</div>
-            <div class="act-meta">{last_act['start_date'].strftime('%d %b %Y · %H:%M')} ·
-                <span class="zone-chip" style="background:{z_c}22;color:{z_c}">{z_l}</span>
+    _last5 = df.iloc[-5:][::-1]
+    for _i5, (_, _row5) in enumerate(_last5.iterrows()):
+        _s5   = get_sport_info(_row5["type"], _row5.get("name",""))
+        _m5   = format_metrics(_row5)
+        _id5  = _row5.get("id", _row5.name)
+        _zn5, _zc5, _zl5 = get_zone_for_activity(_row5, u["fc_max"])
+        _is_first = (_i5 == 0)
+
+        st.markdown(f"""
+        <div class="act-card" style="border-left-color:{_s5['color']}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div style="flex:1;min-width:0">
+              {"<div class=\"mob-card-title\">🕐 Ultima Attività</div>" if _is_first else ""}
+              <div class="act-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                {_s5['icon']} {_row5['name']}
+              </div>
+              <div class="act-meta">{_row5['start_date'].strftime('%d %b %Y · %H:%M')} ·
+                <span class="zone-chip" style="background:{_zc5}22;color:{_zc5}">{_zl5}</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="act-pills" style="margin-top:6px">
-            <span class="act-pill">📏 <b>{m['dist_str']}</b></span>
-            <span class="act-pill">⏱️ <b>{m['dur_str']}</b></span>
-            <span class="act-pill">⚡ <b>{m['pace_str']}</b></span>
-            <span class="act-pill">⛰️ <b>{m['elev']}</b></span>
-            <span class="act-pill">❤️ <b>{m['hr_avg']} bpm</b></span>
-            <span class="act-pill">📊 TSS <b>{last_act['tss']:.0f}</b></span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Pulsante lente direttamente nella card
-    if st.button("🔍 Vedi dettaglio completo", key="dash_det_last", use_container_width=True):
-        st.session_state.selected_act_id = _act_id
-        st.rerun()
-
-    # Mappa ultima attività
-    poly = last_act.get("map", {})
-    poly = poly.get("summary_polyline") if isinstance(poly, dict) else None
-    if poly:
-        mobj = draw_map(poly)
-        if mobj:
-            st.markdown('<div style="margin:0 12px">', unsafe_allow_html=True)
-            st_folium(mobj, width=None, height=200, key="dash_map")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # ── Commento AI automatico ultima attività ──
-    _last_ai_key = f"dash_ai_{str(_act_id)}"
-    if _last_ai_key not in st.session_state and _ai_sdk_mode is not None:
-        with st.spinner("🤖 Il coach commenta l'ultima uscita..."):
-            _ctx = (f"Sport: {s['label']}. Distanza: {m['dist_str']}. "
-                    f"Durata: {m['dur_str']}. Passo: {m['pace_str']}. "
-                    f"Dislivello: {m['elev']}. FC media: {m['hr_avg']}. "
-                    f"TSS: {last_act['tss']:.0f}. CTL: {current_ctl:.0f}, TSB: {current_tsb:.0f}.")
-            _ai_resp = ai_generate(
-                _ctx + "\n\nSei un coach d'élite. In 2 frasi brevi commenta questa sessione "
-                "e dai UN suggerimento pratico per la prossima. Sii diretto, niente preamboli.")
-            st.session_state[_last_ai_key] = _ai_resp
-            st.rerun()
-
-    if _last_ai_key in st.session_state:
-        _ai_txt = st.session_state[_last_ai_key]
-        if not _ai_txt.startswith("⚠️"):
-            st.markdown(f'<div class="ai-box" style="margin:8px 12px 0">{_ai_txt}</div>',
-                        unsafe_allow_html=True)
-
-    # ── Ultime 5 attività ──
-    st.markdown('<div class="mob-card" style="margin-top:8px">', unsafe_allow_html=True)
-    st.markdown('<div class="mob-card-title">🏅 Ultime 5 Attività</div>', unsafe_allow_html=True)
-    for _, _row5 in df.iloc[-5:][::-1].iterrows():
-        _s5  = get_sport_info(_row5["type"], _row5.get("name",""))
-        _m5  = format_metrics(_row5)
-        _id5 = _row5.get("id", _row5.name)
-        st.markdown(f"""
-        <div style="padding:8px 0;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:10px">
-          <div style="font-size:22px">{_s5['icon']}</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:700;color:#1a1a1a;
-                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{_row5['name']}</div>
-            <div style="font-size:11px;color:#888">{_row5['start_date'].strftime('%d %b · %H:%M')}
-              · {_m5['dist_str']} · {_m5['dur_str']}</div>
-          </div>
-          <div style="font-size:12px;color:{_s5['color']};font-weight:700;white-space:nowrap">
-            {_row5['tss']:.0f} TSS
+          <div class="act-pills" style="margin-top:6px">
+            <span class="act-pill">📏 <b>{_m5['dist_str']}</b></span>
+            <span class="act-pill">⏱️ <b>{_m5['dur_str']}</b></span>
+            <span class="act-pill">⚡ <b>{_m5['pace_str']}</b></span>
+            <span class="act-pill">⛰️ <b>{_m5['elev']}</b></span>
+            <span class="act-pill">❤️ <b>{_m5['hr_avg']} bpm</b></span>
+            <span class="act-pill">📊 TSS <b>{_row5['tss']:.0f}</b></span>
           </div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("🔍", key=f"dash5_{_id5}"):
+
+        # Pulsante dettaglio
+        if st.button(f"🔍 Dettaglio", key=f"dash5_det_{_id5}", use_container_width=True):
             st.session_state.selected_act_id = _id5
             st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+
+        # Mappa solo per la prima attività
+        if _is_first:
+            _poly5 = _row5.get("map", {})
+            _poly5 = _poly5.get("summary_polyline") if isinstance(_poly5, dict) else None
+            if _poly5:
+                _mobj5 = draw_map(_poly5)
+                if _mobj5:
+                    st.markdown('<div style="margin:0 12px 4px">', unsafe_allow_html=True)
+                    st_folium(_mobj5, width=None, height=200, key="dash_map_0")
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+            # ── Commento AI automatico ultima attività ──
+            _last_ai_key = f"dash_ai_{str(_id5)}"
+            if _last_ai_key not in st.session_state and _ai_sdk_mode is not None:
+                with st.spinner("🤖 Il coach commenta l'ultima uscita..."):
+                    _ctx5 = (f"Sport: {_s5['label']}. Distanza: {_m5['dist_str']}. "
+                             f"Durata: {_m5['dur_str']}. Passo: {_m5['pace_str']}. "
+                             f"Dislivello: {_m5['elev']}. FC media: {_m5['hr_avg']}. "
+                             f"TSS: {_row5['tss']:.0f}. CTL: {current_ctl:.0f}, TSB: {current_tsb:.0f}.")
+                    _ai_resp5 = ai_generate(
+                        _ctx5 + "\n\nSei un coach d'élite. In 2 frasi brevi commenta questa sessione "
+                        "e dai UN suggerimento pratico per la prossima. Sii diretto, niente preamboli.")
+                    st.session_state[_last_ai_key] = _ai_resp5
+                    st.rerun()
+            if _last_ai_key in st.session_state:
+                _ai_txt5 = st.session_state[_last_ai_key]
+                if not _ai_txt5.startswith("⚠️"):
+                    st.markdown(f'<div class="ai-box" style="margin:0 12px 8px">{_ai_txt5}</div>',
+                                unsafe_allow_html=True)
 
 # ============================================================
 # ── MENU: FITNESS ────────────────────────────────────────────
@@ -1845,8 +1930,15 @@ elif st.session_state.mob_menu == "profilo":
     # ── Selettore modello AI ──
     st.markdown('<div class="mob-card"><div class="mob-card-title">🤖 Modello AI</div>',
                 unsafe_allow_html=True)
-    _model_options = list(_ALL_MODELS_LABELS.keys())
-    _model_labels  = list(_ALL_MODELS_LABELS.values())
+    # Riscovery dinamica se richiesta
+    if st.button("🔄 Aggiorna lista modelli", use_container_width=True, key="refresh_models"):
+        _refreshed = _discover_available_models()
+        st.session_state["_ai_models_cache"] = _refreshed
+        st.rerun()
+    # Usa cache se disponibile
+    _models_to_use = st.session_state.get("_ai_models_cache", _ALL_MODELS_LABELS)
+    _model_options = list(_models_to_use.keys())
+    _model_labels  = list(_models_to_use.values())
     _cur_pref = st.session_state.get("ai_model_pref","auto")
     _cur_idx  = _model_options.index(_cur_pref) if _cur_pref in _model_options else 0
     _sel_idx  = st.selectbox(
@@ -1860,6 +1952,9 @@ elif st.session_state.mob_menu == "profilo":
     if _sel_model != _cur_pref:
         st.session_state["ai_model_pref"] = _sel_model
         st.rerun()
+    st.markdown(f'<div style="font-size:11px;color:#888;margin-top:4px">'
+                f'{len(_model_options)-1} modelli disponibili</div>',
+                unsafe_allow_html=True)
     # Nota info modello
     _notes = {
         "auto":                         "Sceglie automaticamente il modello migliore disponibile.",
