@@ -110,8 +110,8 @@ st.markdown("""
       margin: 2px 0 0;
   }
 
-  /* Bottom Navigation Bar */
-  .bottom-nav {
+  /* Bottom Navigation Bar — layer decorativo */
+  .bottom-nav-decor {
       position: fixed;
       bottom: 0; left: 0; right: 0;
       background: #ffffff;
@@ -120,24 +120,46 @@ st.markdown("""
       justify-content: space-around;
       align-items: center;
       padding: 6px 0 10px;
-      z-index: 1000;
+      z-index: 999;
       box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
+      pointer-events: none;
   }
   .nav-item {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 2px;
-      cursor: pointer;
       padding: 4px 12px;
       border-radius: 12px;
-      transition: background 0.15s;
-      text-decoration: none;
   }
   .nav-item.active { background: #E3F2FD; }
   .nav-icon { font-size: 22px; line-height: 1; }
   .nav-label { font-size: 10px; font-weight: 600; color: #555; }
   .nav-item.active .nav-label { color: #1565C0; }
+
+  /* Pulsanti nav reali — invisibili ma cliccabili, sovrapposti alla nav bar */
+  div[data-testid="stHorizontalBlock"]:has(button[kind="secondary"][data-baseweb="button"]) {
+      position: fixed !important;
+      bottom: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      z-index: 1001 !important;
+      background: transparent !important;
+      padding: 0 !important;
+      gap: 0 !important;
+      height: 64px !important;
+  }
+  div[data-testid="stHorizontalBlock"]:has(button[kind="secondary"][data-baseweb="button"]) > div {
+      padding: 0 !important;
+  }
+  /* Nascondi testo nei pulsanti nav, mantieni solo area cliccabile */
+  button[key^="nav_btn_"] {
+      opacity: 0 !important;
+      height: 64px !important;
+      min-height: 64px !important;
+      border: none !important;
+      background: transparent !important;
+  }
 
   /* Card generica */
   .mob-card {
@@ -888,6 +910,139 @@ def ai_deep(prompt: str) -> str:
     return ai_generate(prompt, max_tokens=2000)
 
 # ============================================================
+# CONTESTO AI — builder functions
+# ============================================================
+
+def build_activity_context(row, df, u, current_ctl, current_atl, current_tsb,
+                            status_label, window_days=14) -> str:
+    """Contesto ricco per analisi singola attività con storico 14gg."""
+    s   = get_sport_info(row["type"], row.get("name",""))
+    m   = format_metrics(row)
+    act_date = row["start_date"]
+    ftp      = u.get("ftp", 200)
+    is_bike  = row["type"] in ("Ride","VirtualRide","MountainBikeRide")
+    watts    = row.get("average_watts")
+
+    # Attività nei window_days precedenti
+    cutoff = act_date - pd.Timedelta(days=window_days)
+    prev   = df[(df["start_date"] >= cutoff) & (df["start_date"] < act_date)]
+    prev_lines = ""
+    for _, pr in prev.tail(12).iterrows():
+        ps = get_sport_info(pr["type"])
+        pm = format_metrics(pr)
+        prev_lines += ("  - " + pr["start_date"].strftime("%d/%m") + " " + ps["icon"] +
+                       " " + str(pr["name"])[:30] + ": " +
+                       pm["dist_str"] + " " + pm["dur_str"] +
+                       " TSS=" + str(round(pr["tss"],0)) + "\n")
+
+    act_ctl = float(row.get("ctl", current_ctl))
+    act_atl = float(row.get("atl", current_atl))
+    act_tsb = float(row.get("tsb", current_tsb))
+
+    watt_line = ""
+    if is_bike and pd.notna(watts) and watts and watts > 0 and ftp > 0:
+        IF_  = watts / ftp
+        tssp = (row["moving_time"] * watts * IF_) / (ftp * 3600) * 100
+        est  = " (stimati Strava)" if not row.get("device_watts", False) else ""
+        watt_line = "Watt: " + str(round(watts)) + "W IF=" + str(round(IF_,2)) + " TSS_pot=" + str(round(tssp)) + est + "\n"
+
+    lines = [
+        "=== ATTIVITÀ ===",
+        "Data: " + act_date.strftime("%d/%m/%Y %H:%M"),
+        "Sport: " + s["label"],
+        "Nome: " + str(row["name"]),
+        "Distanza: " + m["dist_str"],
+        "Durata: " + m["dur_str"],
+        "Ritmo/Vel: " + m["pace_str"],
+        "Dislivello: " + m["elev"],
+        "FC media: " + m["hr_avg"] + " bpm | FC max: " + m["hr_max"] + " bpm",
+        watt_line.strip() if watt_line else None,
+        "TSS: " + str(round(row["tss"],1)),
+        "",
+        "=== STATO AL MOMENTO ===",
+        "CTL: " + str(round(act_ctl)) + " | ATL: " + str(round(act_atl)) + " | TSB: " + str(round(act_tsb,1)),
+        "",
+        "=== PROFILO ATLETA ===",
+        "Eta: " + str(u.get("eta",33)) + " anni | Peso: " + str(u.get("peso",75)) + "kg",
+        "FC max: " + str(u["fc_max"]) + " bpm | FC riposo: " + str(u["fc_min"]) + " bpm",
+        "FTP: " + str(ftp) + " W",
+        "",
+        "=== ULTIME " + str(window_days) + " GIORNATE (sessioni precedenti) ===",
+        "Sessioni: " + str(len(prev)) + " | TSS totale: " + str(round(prev["tss"].sum())),
+    ]
+    ctx = "\n".join(l for l in lines if l is not None)
+    if prev_lines:
+        ctx += "\nDettaglio:\n" + prev_lines
+    return ctx
+
+
+def build_chat_context(df, u, current_ctl, current_atl, current_tsb,
+                       status_label, vo2max_val) -> str:
+    """Contesto ricco per la chat: 6 mesi completi + storico mensile."""
+    ftp = u.get("ftp", 200)
+    now = df["start_date"].max()
+    cut6m = now - pd.Timedelta(days=180)
+    df6m  = df[df["start_date"] >= cut6m].copy()
+
+    # Ultimi 6 mesi — ogni attività
+    lines_6m = []
+    for _, row in df6m.iterrows():
+        s_ = get_sport_info(row["type"])
+        m_ = format_metrics(row)
+        wl = ""
+        if pd.notna(row.get("average_watts")) and row.get("average_watts",0) > 0 and ftp > 0:
+            w_  = row["average_watts"]
+            IF_ = w_ / ftp
+            wl  = " W=" + str(round(w_)) + "(IF=" + str(round(IF_,2)) + ")"
+        hrl = ""
+        if pd.notna(row.get("average_heartrate")):
+            hrl = " FC=" + str(round(row["average_heartrate"]))
+        lines_6m.append(
+            row["start_date"].strftime("%d/%m/%y") + " " + s_["icon"] + " " +
+            str(row["name"])[:35] + ": " + m_["dist_str"] + " " + m_["dur_str"] +
+            " D+" + m_["elev"] + hrl + wl +
+            " TSS=" + str(round(row["tss"])) +
+            " CTL=" + str(round(float(row.get("ctl",0)))) +
+            " TSB=" + str(round(float(row.get("tsb",0)),1))
+        )
+
+    # Storico precedente — mensile
+    df_old = df[df["start_date"] < cut6m].copy()
+    monthly = []
+    if not df_old.empty:
+        df_old["ym"] = df_old["start_date"].dt.to_period("M")
+        for ym, grp in df_old.groupby("ym"):
+            monthly.append(
+                str(ym) + ": " + str(len(grp)) + " sess, " +
+                "km=" + str(round(grp["distance"].sum()/1000)) + " " +
+                "TSS=" + str(round(grp["tss"].sum())) + " " +
+                "D+=" + str(round(grp["total_elevation_gain"].sum())) + "m"
+            )
+
+    df7  = df[df["start_date"] >= now - pd.Timedelta(days=7)]
+    df28 = df[df["start_date"] >= now - pd.Timedelta(days=28)]
+
+    header = "\n".join([
+        "=== PROFILO ATLETA ===",
+        "Eta: " + str(u.get("eta",33)) + " anni | Peso: " + str(u.get("peso",75)) + "kg",
+        "FC max: " + str(u["fc_max"]) + " | FC riposo: " + str(u["fc_min"]),
+        "FTP: " + str(ftp) + "W | VO2max: " + str(vo2max_val or "N/D") + " ml/kg/min",
+        "",
+        "=== STATO ATTUALE ===",
+        "CTL=" + str(round(current_ctl)) + " ATL=" + str(round(current_atl)) + " TSB=" + str(round(current_tsb,1)),
+        "Stato: " + status_label,
+        "Ultimi 7gg: " + str(len(df7)) + " sess, TSS=" + str(round(df7["tss"].sum())),
+        "Ultimi 28gg: " + str(len(df28)) + " sess, TSS=" + str(round(df28["tss"].sum())) +
+        " km=" + str(round(df28["distance"].sum()/1000)),
+        "",
+        "=== ULTIMI 6 MESI — " + str(len(df6m)) + " ATTIVITA' ===",
+    ])
+    ctx = header + "\n" + "\n".join(lines_6m)
+    if monthly:
+        ctx += "\n\n=== STORICO MENSILE PRECEDENTE ===\n" + "\n".join(monthly)
+    return ctx
+
+# ============================================================
 # SESSION STATE
 # ============================================================
 for key, val in {
@@ -929,30 +1084,30 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Bottom nav via query param — nessun pulsante visibile."""
+    """Bottom nav: overlay CSS sopra i pulsanti Streamlit reali."""
     cur = st.session_state.mob_menu
-    # Leggi click dalla query param ?nav=xxx impostata dal JS onclick
-    _nav_req = st.query_params.get("nav", "")
-    if _nav_req and _nav_req != cur:
-        st.session_state.mob_menu = _nav_req
-        st.session_state.selected_act_id = None
-        st.query_params.clear()
-        st.rerun()
 
+    # HTML decorativo (solo visivo, non clickabile)
     items_html = ""
     for key, icon, label in NAV_ITEMS:
         active_cls = "active" if cur == key else ""
-        # onclick imposta ?nav=key e ricarica — funziona su mobile senza JS bloccato
         items_html += (
-            f'<a class="nav-item {active_cls}" href="?nav={key}" target="_self">' 
+            f'<div class="nav-item {active_cls}">' 
             f'<span class="nav-icon">{icon}</span>'
             f'<span class="nav-label">{label}</span>'
-            f'</a>'
+            f'</div>'
         )
-    st.markdown(
-        f'<div class="bottom-nav">{items_html}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div class="bottom-nav-decor">{items_html}</div>', unsafe_allow_html=True)
+
+    # Pulsanti reali sovrapposti con CSS — coprono esattamente la nav bar
+    cols = st.columns(5)
+    for i, (key, icon, label) in enumerate(NAV_ITEMS):
+        with cols[i]:
+            if st.button(label, key=f"nav_btn_{key}", use_container_width=True,
+                         type="secondary"):
+                st.session_state.mob_menu = key
+                st.session_state.selected_act_id = None
+                st.rerun()
 
 # ============================================================
 # LOGIN PAGE
@@ -1345,29 +1500,37 @@ if st.session_state.selected_act_id is not None:
             pw3.metric("📈 TSS pot.",    f"{_tss_p:.0f}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # Analisi AI
-        st.markdown("""<div class="mob-card">
-        <div class="mob-card-title">🤖 Analisi Coach</div>""", unsafe_allow_html=True)
+        # Analisi AI — auto con contesto ricco 14gg
+        st.markdown('<div class="mob-card"><div class="mob-card-title">&#129302; Analisi Coach</div>',
+                    unsafe_allow_html=True)
         _aid = str(row.get("id", str(row["start_date"])))
         _ck  = f"mob_ai_{_aid}"
         if _ck in st.session_state:
             st.markdown(f'<div class="ai-box">{st.session_state[_ck]}</div>',
                         unsafe_allow_html=True)
+            if st.button("&#128260; Rigenera", key=f"regen_{_aid}", use_container_width=True):
+                del st.session_state[_ck]
+                st.rerun()
         else:
-            if st.button("🤖 Chiedi al Coach", use_container_width=True, type="primary"):
-                with st.spinner("Il coach sta analizzando..."):
-                    _ctx = (f"Sport: {s['label']}. Distanza: {m['dist_str']}. "
-                            f"Durata: {m['dur_str']}. Passo: {m['pace_str']}. "
-                            f"Dislivello: {m['elev']}. FC media: {m['hr_avg']}. "
-                            f"Watt: {m['watts']}. TSS: {row['tss']:.0f}. "
-                            f"CTL: {current_ctl:.0f}, TSB: {current_tsb:.0f}. "
-                            f"Forma attuale: {status_label}.")
-                    _res = ai_deep(_ctx + "\n\nSei un coach d'élite. "
-                        "Commenta questa sessione in 3 paragrafi brevi: "
-                        "qualità dell'allenamento, zone di lavoro, "
-                        "suggerimento concreto per la prossima sessione.")
-                    st.session_state[_ck] = _res
-                    st.rerun()
+            # Genera automaticamente senza bisogno di pulsante
+            with st.spinner("Il coach sta analizzando (14gg contesto)..."):
+                _rich_ctx = build_activity_context(
+                    row, df, u, current_ctl, current_atl, current_tsb, status_label,
+                    window_days=14
+                )
+                _prompt = (
+                    _rich_ctx +
+                    "\n\n=== ISTRUZIONI COACH ===\n"
+                    "Sei un coach sportivo d'élite specializzato in ciclismo e trail running. "
+                    "Rispondi in italiano. Analizza questa sessione in 3 paragrafi:\n"
+                    "1) Qualità dell'allenamento e zone di lavoro rispetto al profilo dell'atleta\n"
+                    "2) Come questa sessione si inserisce nel contesto delle ultime 2 settimane\n"
+                    "3) Un consiglio concreto e specifico per la prossima sessione\n"
+                    "Sii diretto, usa i dati numerici, niente frasi generiche."
+                )
+                _res = ai_deep(_prompt)
+                st.session_state[_ck] = _res
+                st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
         render_bottom_nav()
@@ -1467,76 +1630,83 @@ if st.session_state.mob_menu == "dashboard":
     st.plotly_chart(fig, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Ultime 5 attività — card complete con mappa della prima ──
-    st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 4px;color:#1a1a1a">🏅 Ultime attività</h4></div>',
+    # ── Ultime 5 attività ──
+    st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 4px;color:#1a1a1a">&#127885; Ultime attività</h4></div>',
                 unsafe_allow_html=True)
 
-    _last5 = df.iloc[-5:][::-1]
-    for _i5, (_, _row5) in enumerate(_last5.iterrows()):
+    _last5_df = df.iloc[-5:][::-1]
+    for _i5, (_, _row5) in enumerate(_last5_df.iterrows()):
         _s5   = get_sport_info(_row5["type"], _row5.get("name",""))
         _m5   = format_metrics(_row5)
         _id5  = _row5.get("id", _row5.name)
         _zn5, _zc5, _zl5 = get_zone_for_activity(_row5, u["fc_max"])
         _is_first = (_i5 == 0)
 
-        st.markdown(f"""
-        <div class="act-card" style="border-left-color:{_s5['color']}">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div style="flex:1;min-width:0">
-              {"<div class=\"mob-card-title\">🕐 Ultima Attività</div>" if _is_first else ""}
-              <div class="act-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                {_s5['icon']} {_row5['name']}
-              </div>
-              <div class="act-meta">{_row5['start_date'].strftime('%d %b %Y · %H:%M')} ·
-                <span class="zone-chip" style="background:{_zc5}22;color:{_zc5}">{_zl5}</span>
-              </div>
-            </div>
-          </div>
-          <div class="act-pills" style="margin-top:6px">
-            <span class="act-pill">📏 <b>{_m5['dist_str']}</b></span>
-            <span class="act-pill">⏱️ <b>{_m5['dur_str']}</b></span>
-            <span class="act-pill">⚡ <b>{_m5['pace_str']}</b></span>
-            <span class="act-pill">⛰️ <b>{_m5['elev']}</b></span>
-            <span class="act-pill">❤️ <b>{_m5['hr_avg']} bpm</b></span>
-            <span class="act-pill">📊 TSS <b>{_row5['tss']:.0f}</b></span>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Pre-calcola tutte le variabili
+        _title_html   = '<div class="mob-card-title">&#128336; Ultima Attivit&agrave;</div>' if _is_first else ""
+        _name5        = str(_row5["name"])
+        _date5        = _row5["start_date"].strftime("%d %b %Y &middot; %H:%M")
+        _icon5        = _s5["icon"]
+        _color5       = _s5["color"]
+        _dist5        = _m5["dist_str"]
+        _dur5         = _m5["dur_str"]
+        _pace5        = _m5["pace_str"]
+        _elev5        = _m5["elev"]
+        _hr5          = _m5["hr_avg"]
+        _tss5         = f"{_row5['tss']:.0f}"
 
-        # Pulsante dettaglio
-        if st.button(f"🔍 Dettaglio", key=f"dash5_det_{_id5}", use_container_width=True):
+        st.markdown(
+            f'<div class="act-card" style="border-left-color:{_color5}">' +
+            _title_html +
+            f'<div class="act-title">{_icon5} {_name5}</div>' +
+            f'<div class="act-meta">{_date5} &middot; <span class="zone-chip" style="background:{_zc5}22;color:{_zc5}">{_zl5}</span></div>' +
+            f'<div class="act-pills" style="margin-top:6px">' +
+            f'<span class="act-pill">&#128207; <b>{_dist5}</b></span>' +
+            f'<span class="act-pill">&#9201;&#65039; <b>{_dur5}</b></span>' +
+            f'<span class="act-pill">&#9889; <b>{_pace5}</b></span>' +
+            f'<span class="act-pill">&#9968;&#65039; <b>{_elev5}</b></span>' +
+            f'<span class="act-pill">&#10084;&#65039; <b>{_hr5} bpm</b></span>' +
+            f'<span class="act-pill">TSS <b>{_tss5}</b></span>' +
+            '</div></div>',
+            unsafe_allow_html=True
+        )
+
+        if st.button("&#128269; Dettaglio", key=f"dash5_{_id5}", use_container_width=True):
             st.session_state.selected_act_id = _id5
             st.rerun()
 
-        # Mappa solo per la prima attività
+        # Solo prima attività: mappa + AI
         if _is_first:
             _poly5 = _row5.get("map", {})
             _poly5 = _poly5.get("summary_polyline") if isinstance(_poly5, dict) else None
             if _poly5:
                 _mobj5 = draw_map(_poly5)
                 if _mobj5:
-                    st.markdown('<div style="margin:0 12px 4px">', unsafe_allow_html=True)
                     st_folium(_mobj5, width=None, height=200, key="dash_map_0")
-                    st.markdown('</div>', unsafe_allow_html=True)
 
-            # ── Commento AI automatico ultima attività ──
-            _last_ai_key = f"dash_ai_{str(_id5)}"
-            if _last_ai_key not in st.session_state and _ai_sdk_mode is not None:
-                with st.spinner("🤖 Il coach commenta l'ultima uscita..."):
-                    _ctx5 = (f"Sport: {_s5['label']}. Distanza: {_m5['dist_str']}. "
-                             f"Durata: {_m5['dur_str']}. Passo: {_m5['pace_str']}. "
-                             f"Dislivello: {_m5['elev']}. FC media: {_m5['hr_avg']}. "
-                             f"TSS: {_row5['tss']:.0f}. CTL: {current_ctl:.0f}, TSB: {current_tsb:.0f}.")
-                    _ai_resp5 = ai_generate(
-                        _ctx5 + "\n\nSei un coach d'élite. In 2 frasi brevi commenta questa sessione "
-                        "e dai UN suggerimento pratico per la prossima. Sii diretto, niente preamboli.")
-                    st.session_state[_last_ai_key] = _ai_resp5
+            # AI automatico — si carica subito senza pulsante
+            _ak5 = f"dash_ai_{_id5}"
+            if _ak5 not in st.session_state and _ai_sdk_mode is not None:
+                with st.spinner("&#129302; Coach analizza l'ultima uscita..."):
+                    _ctx5 = (
+                        f"Sei un coach d'élite. Atleta: {u.get('eta',33)} anni, "
+                        f"FTP {u.get('ftp',200)}W, FCmax {u['fc_max']}bpm, "
+                        f"CTL={current_ctl:.0f}, ATL={current_atl:.0f}, TSB={current_tsb:.0f} ({status_label}).\n"
+                        f"Ultima sessione — Sport: {_s5['label']}, "
+                        f"Distanza: {_m5['dist_str']}, Durata: {_m5['dur_str']}, "
+                        f"Passo: {_m5['pace_str']}, D+: {_m5['elev']}, "
+                        f"FC media: {_m5['hr_avg']} bpm, TSS: {_tss5}.\n\n"
+                        "In 2 frasi concise: commenta la qualità della sessione e dai UN consiglio "
+                        "pratico per la prossima. Sii diretto, niente preamboli."
+                    )
+                    _ai5 = ai_generate(_ctx5)
+                    st.session_state[_ak5] = _ai5
                     st.rerun()
-            if _last_ai_key in st.session_state:
-                _ai_txt5 = st.session_state[_last_ai_key]
-                if not _ai_txt5.startswith("⚠️"):
-                    st.markdown(f'<div class="ai-box" style="margin:0 12px 8px">{_ai_txt5}</div>',
-                                unsafe_allow_html=True)
+
+            if _ak5 in st.session_state and not str(st.session_state[_ak5]).startswith("⚠️"):
+                st.markdown(
+                    f'<div class="ai-box" style="margin:0 0 8px">{st.session_state[_ak5]}</div>',
+                    unsafe_allow_html=True)
 
 # ============================================================
 # ── MENU: FITNESS ────────────────────────────────────────────
@@ -1840,16 +2010,17 @@ elif st.session_state.mob_menu == "chat":
     if _ai_sdk_mode is None:
         st.warning("⚠️ Aggiungi GOOGLE_API_KEY nei Secrets per abilitare il Coach AI.")
     else:
-        # Contesto coach
-        _last7 = df[df["start_date"] >= df["start_date"].max() - timedelta(days=7)]
+        # Contesto coach ricco — 6 mesi dati completi
+        if "chat_ctx_cache" not in st.session_state:
+            st.session_state["chat_ctx_cache"] = build_chat_context(
+                df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val
+            )
         _ctx_sys = (
-            f"Sei un coach sportivo d'élite specializzato in ciclismo, trail running e sci alpinismo. "
-            f"Rispondi sempre in italiano, in modo conciso e pratico. "
-            f"Dati atleta: CTL={current_ctl:.0f}, ATL={current_atl:.0f}, TSB={current_tsb:.0f}, "
-            f"Forma={status_label}. FTP={u.get('ftp',200)}W, FC_max={u['fc_max']}bpm. "
-            f"Ultimi 7gg: {len(_last7)} sessioni, TSS={_last7['tss'].sum():.0f}. "
-            f"VO2max stimato: {vo2max_val or 'N/D'} ml/kg/min. "
-            f"Ultima attività: {last_act['name']} ({last_act['start_date'].strftime('%d/%m')})."
+            "Sei un coach sportivo d'élite specializzato in ciclismo, trail running e sci alpinismo. "
+            "Rispondi sempre in italiano, in modo conciso, pratico e basato sui dati. "
+            "Usa i numeri specifici quando disponibili. "
+            "Niente frasi generiche: sii diretto come un coach professionista.\n\n"
+            + st.session_state["chat_ctx_cache"]
         )
 
         # Mostra messaggi
@@ -1900,9 +2071,16 @@ elif st.session_state.mob_menu == "chat":
 
         if st.session_state.messages:
             st.markdown('<div class="sec-pad">', unsafe_allow_html=True)
-            if st.button("🗑️ Nuova conversazione", use_container_width=True):
-                st.session_state.messages = []
-                st.rerun()
+            c_clr1, c_clr2 = st.columns(2)
+            with c_clr1:
+                if st.button("&#128465; Nuova chat", use_container_width=True):
+                    st.session_state.messages = []
+                    st.rerun()
+            with c_clr2:
+                if st.button("&#128260; Aggiorna contesto", use_container_width=True):
+                    if "chat_ctx_cache" in st.session_state:
+                        del st.session_state["chat_ctx_cache"]
+                    st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================
