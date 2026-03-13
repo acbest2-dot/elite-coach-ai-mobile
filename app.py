@@ -14,7 +14,7 @@ import calendar as cal_module
 # ============================================================
 # CONFIGURAZIONE
 # ============================================================
-REDIRECT_URI = "https://elite-ai-coach-mobile.streamlit.app/"  # ← aggiorna con il tuo URL mobile
+REDIRECT_URI = "https://elite-ai-coach-mobile.streamlit.app"  # ← aggiorna con il tuo URL mobile
 
 def get_secret(key):
     return st.secrets.get(key) or os.getenv(key)
@@ -442,22 +442,49 @@ def calc_vo2max_estimate(df_sorted):
 # GOOGLE SHEETS — Cache persistente
 # ============================================================
 def _get_gsheet_client():
-    """Restituisce il client gspread se configurato, altrimenti None."""
-    if not GSHEET_ID or not GSHEET_CREDS:
+    """Restituisce (client, sheet) se configurato, altrimenti (None, None) con errore loggato."""
+    if not GSHEET_ID:
+        st.session_state["_gsheet_err"] = "❌ GSHEET_ID mancante nei Secrets"
+        return None, None
+    if not GSHEET_CREDS:
+        st.session_state["_gsheet_err"] = "❌ GSHEET_CREDENTIALS mancante nei Secrets"
         return None, None
     try:
         import gspread
         from google.oauth2.service_account import Credentials
-        creds_dict = json.loads(GSHEET_CREDS)
+        try:
+            creds_dict = json.loads(GSHEET_CREDS)
+        except json.JSONDecodeError as je:
+            st.session_state["_gsheet_err"] = f"❌ GSHEET_CREDENTIALS non è un JSON valido: {je}"
+            return None, None
+        if creds_dict.get("type") != "service_account":
+            st.session_state["_gsheet_err"] = f"❌ JSON non è un service_account (type={creds_dict.get('type')})"
+            return None, None
         scopes = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
         ]
         creds  = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
-        sheet  = client.open_by_key(GSHEET_ID)
+        try:
+            sheet = client.open_by_key(GSHEET_ID)
+        except gspread.exceptions.SpreadsheetNotFound:
+            st.session_state["_gsheet_err"] = (
+                f"❌ Sheet non trovato (ID: {GSHEET_ID[:12]}...). "
+                f"Controlla GSHEET_ID e che il Sheet sia condiviso con: {creds_dict.get('client_email','?')}"
+            )
+            return None, None
+        except Exception as e:
+            st.session_state["_gsheet_err"] = f"❌ Errore apertura sheet: {e}"
+            return None, None
+        st.session_state["_gsheet_err"] = None  # nessun errore
+        st.session_state["_gsheet_email"] = creds_dict.get("client_email","?")
         return client, sheet
+    except ImportError:
+        st.session_state["_gsheet_err"] = "❌ Libreria 'gspread' non installata. Aggiungila al requirements.txt"
+        return None, None
     except Exception as e:
+        st.session_state["_gsheet_err"] = f"❌ Errore generico GSheet: {e}"
         return None, None
 
 def gsheet_load_activities() -> list:
@@ -515,8 +542,12 @@ def gsheet_save_activities(activities: list):
         except Exception:
             meta_ws = sheet.add_worksheet(title="meta", rows=10, cols=5)
         meta_ws.update([["last_sync", datetime.now().isoformat()]], "A1")
+        st.session_state["_gsheet_save_ok"]  = True
+        st.session_state["_gsheet_save_rows"] = len(rows) - 1
         return True
     except Exception as e:
+        st.session_state["_gsheet_save_ok"]  = False
+        st.session_state["_gsheet_save_err"] = str(e)
         return False
 
 def gsheet_get_last_sync() -> datetime | None:
@@ -1521,24 +1552,90 @@ elif st.session_state.mob_menu == "profilo":
     </div>
     </div>""", unsafe_allow_html=True)
 
-    # Cache GSheet status
-    if _gsheet_ok:
-        last_sync = gsheet_get_last_sync()
-        sync_str  = last_sync.strftime("%d/%m/%Y %H:%M") if last_sync else "Mai"
-        st.markdown(f"""<div class="mob-card">
-        <div class="mob-card-title">💾 Cache Google Sheets</div>
-        <div style="font-size:13px;color:#555">Ultimo sync: <b>{sync_str}</b></div>
-        <div style="font-size:12px;color:#888;margin-top:4px">
-            Aggiornamento automatico ogni 24h. Dati salvati in modo persistente.
-        </div>
-        </div>""", unsafe_allow_html=True)
-        if st.button("🔄 Forza sync da Strava", use_container_width=True):
-            with st.spinner("Sincronizzazione in corso..."):
-                raw_new = load_all_from_strava(access_token)
-                st.session_state.activities_cache = raw_new
-                gsheet_save_activities(raw_new)
-            st.success(f"✅ {len(raw_new)} attività sincronizzate e salvate!")
-            st.rerun()
+    # ── Pannello Google Sheets con debug completo ──
+    st.markdown('<div class="mob-card"><div class="mob-card-title">💾 Google Sheets Cache</div>',
+                unsafe_allow_html=True)
+
+    # Step 1: Secrets presenti?
+    gs_id_ok   = bool(GSHEET_ID)
+    gs_cred_ok = bool(GSHEET_CREDS)
+    st.markdown(f"**Step 1 — Secrets**", unsafe_allow_html=False)
+    st.markdown(
+        f"{'✅' if gs_id_ok else '❌'} `GSHEET_ID`: "
+        f"{GSHEET_ID[:12]+'...' if gs_id_ok else 'MANCANTE'}"
+    )
+    st.markdown(
+        f"{'✅' if gs_cred_ok else '❌'} `GSHEET_CREDENTIALS`: "
+        f"{'presente (' + str(len(GSHEET_CREDS)) + ' chars)' if gs_cred_ok else 'MANCANTE'}"
+    )
+
+    if gs_id_ok and gs_cred_ok:
+        # Step 2: Connessione
+        st.markdown("**Step 2 — Connessione**")
+        with st.spinner("Test connessione GSheet..."):
+            _, _test_sheet = _get_gsheet_client()
+        _gs_err = st.session_state.get("_gsheet_err")
+        _gs_email = st.session_state.get("_gsheet_email","?")
+        if _test_sheet is not None:
+            st.success(f"✅ Connesso! Account: `{_gs_email}`")
+            # Step 3: Dati nel sheet
+            st.markdown("**Step 3 — Dati nel sheet**")
+            last_sync = gsheet_get_last_sync()
+            if last_sync:
+                st.success(f"✅ Ultimo sync: **{last_sync.strftime('%d/%m/%Y %H:%M')}**")
+            else:
+                st.warning("⚠️ Nessun sync registrato — il sheet potrebbe essere vuoto")
+            # Conta righe
+            try:
+                _acts_ws  = _test_sheet.worksheet("activities")
+                _n_rows   = len(_acts_ws.col_values(1)) - 1  # escludi header
+                if _n_rows > 0:
+                    st.success(f"✅ **{_n_rows}** attività salvate nel sheet")
+                else:
+                    st.error("❌ Sheet 'activities' vuoto — il salvataggio non è avvenuto")
+            except Exception as _we:
+                st.error(f"❌ Tab 'activities' non trovato: {_we}")
+
+            # Step 4: stato ultimo salvataggio
+            st.markdown("**Step 4 — Ultimo salvataggio**")
+            _save_ok  = st.session_state.get("_gsheet_save_ok")
+            _save_rows = st.session_state.get("_gsheet_save_rows", 0)
+            _save_err  = st.session_state.get("_gsheet_save_err","")
+            if _save_ok is True:
+                st.success(f"✅ Ultimo salvataggio OK: {_save_rows} righe scritte")
+            elif _save_ok is False:
+                st.error(f"❌ Ultimo salvataggio FALLITO: {_save_err}")
+            else:
+                st.info("ℹ️ Nessun salvataggio tentato in questa sessione")
+
+            # Pulsanti azione
+            st.markdown("**Azioni**")
+            if st.button("🔄 Forza sync completo da Strava", use_container_width=True, type="primary"):
+                with st.spinner("Scarico tutto da Strava..."):
+                    raw_new = load_all_from_strava(access_token)
+                if raw_new:
+                    with st.spinner(f"Salvo {len(raw_new)} attività nel sheet..."):
+                        _ok = gsheet_save_activities(raw_new)
+                    if _ok:
+                        st.session_state.activities_cache = raw_new
+                        st.success(f"✅ {len(raw_new)} attività sincronizzate e salvate!")
+                    else:
+                        _err = st.session_state.get("_gsheet_save_err","errore sconosciuto")
+                        st.error(f"❌ Salvataggio fallito: {_err}")
+                else:
+                    st.error("❌ Nessuna attività ricevuta da Strava")
+                st.rerun()
+        else:
+            st.error(_gs_err or "❌ Connessione fallita — errore sconosciuto")
+            st.markdown("""
+**Possibili cause:**
+- Il Service Account non ha accesso al Sheet (controlla condivisione)
+- `GSHEET_ID` errato (deve essere l'ID dalla URL, non il nome del file)
+- `GSHEET_CREDENTIALS` malformato (deve essere il JSON completo con triple apici `'''`)
+- Librerie mancanti nel requirements.txt (`gspread`, `google-auth`)
+            """)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # Logout
     st.markdown('<div class="sec-pad" style="margin-top:12px">', unsafe_allow_html=True)
