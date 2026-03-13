@@ -774,6 +774,16 @@ _PRO_MODELS = [
     "gemini-1.5-pro",
     "gemini-1.5-flash",
 ]
+_ALL_MODELS_LABELS = {
+    "auto":                          "🤖 Auto (consigliato)",
+    "gemini-2.5-pro-preview-05-06":  "🧠 Gemini 2.5 Pro (lento, migliore)",
+    "gemini-2.0-flash":              "⚡ Gemini 2.0 Flash (veloce)",
+    "gemini-2.0-flash-lite":         "🚀 Gemini 2.0 Flash Lite (più veloce)",
+    "gemini-1.5-flash":              "💨 Gemini 1.5 Flash (fallback)",
+    "gemini-1.5-pro":                "📚 Gemini 1.5 Pro",
+    "grok-3-fast":                   "⚡ Grok 3 Fast (se key xAI)",
+    "grok-3":                        "🧠 Grok 3 (se key xAI)",
+}
 
 def _is_quota_error(e) -> bool:
     s = str(e).lower()
@@ -783,8 +793,12 @@ def ai_generate(prompt: str, max_tokens: int = 1500) -> str:
     if _ai_sdk_mode is None:
         return "⚠️ Nessun provider AI configurato. Aggiungi GOOGLE_API_KEY nei Secrets."
     last_err = ""
+    # Usa modello preferito se impostato
+    _pref = st.session_state.get("ai_model_pref", "auto")
+    _flash_list = (_FLASH_MODELS if _pref == "auto" or _pref not in _ALL_MODELS_LABELS
+                   else [_pref] + [m for m in _FLASH_MODELS if m != _pref])
     if _ai_sdk_mode == "new":
-        for model in _FLASH_MODELS:
+        for model in _flash_list:
             try:
                 resp = _ai_client.models.generate_content(model=model, contents=prompt)
                 return resp.text
@@ -822,8 +836,11 @@ def ai_generate(prompt: str, max_tokens: int = 1500) -> str:
 
 def ai_deep(prompt: str) -> str:
     """Analisi approfondita — tenta Pro poi fallback su Flash."""
+    _pref = st.session_state.get("ai_model_pref", "auto")
+    _pro_list = (_PRO_MODELS if _pref == "auto" or _pref not in _ALL_MODELS_LABELS
+                 else [_pref] + [m for m in _PRO_MODELS if m != _pref])
     if _ai_sdk_mode == "new":
-        for model in _PRO_MODELS:
+        for model in _pro_list:
             try:
                 resp = _ai_client.models.generate_content(model=model, contents=prompt)
                 return resp.text
@@ -845,19 +862,10 @@ for key, val in {
     "mob_menu":           "dashboard",
     "selected_act_id":    None,
     "gsheet_loaded":      False,
+    "ai_model_pref":      "auto",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
-
-# ── Carica profilo da GSheet (una volta per sessione) ──────────
-if _gsheet_ok and not st.session_state.get("_profile_loaded"):
-    _saved_profile = gsheet_load_profile()
-    if _saved_profile:
-        # Merge: mantieni defaults per chiavi mancanti
-        merged_profile = dict(st.session_state.user_data)
-        merged_profile.update(_saved_profile)
-        st.session_state.user_data = merged_profile
-    st.session_state["_profile_loaded"] = True
 
 # ============================================================
 # OAUTH
@@ -948,6 +956,15 @@ athlete      = fetch_athlete(access_token)
 
 # ── Logica caricamento con Google Sheets ──
 _gsheet_ok = bool(GSHEET_ID and GSHEET_CREDS)
+
+# ── Carica profilo da GSheet (una volta per sessione) ──
+if _gsheet_ok and not st.session_state.get("_profile_loaded"):
+    _saved_profile = gsheet_load_profile()
+    if _saved_profile:
+        merged_profile = dict(st.session_state.user_data)
+        merged_profile.update(_saved_profile)
+        st.session_state.user_data = merged_profile
+    st.session_state["_profile_loaded"] = True
 
 if not st.session_state.activities_cache:
     # Prima prova dal Google Sheet
@@ -1824,6 +1841,39 @@ elif st.session_state.mob_menu == "profilo":
             🎿 {df[df['type'].isin(['BackcountrySki','AlpineSki'])].shape[0]} uscite sci
         </div>
         </div>""", unsafe_allow_html=True)
+
+    # ── Selettore modello AI ──
+    st.markdown('<div class="mob-card"><div class="mob-card-title">🤖 Modello AI</div>',
+                unsafe_allow_html=True)
+    _model_options = list(_ALL_MODELS_LABELS.keys())
+    _model_labels  = list(_ALL_MODELS_LABELS.values())
+    _cur_pref = st.session_state.get("ai_model_pref","auto")
+    _cur_idx  = _model_options.index(_cur_pref) if _cur_pref in _model_options else 0
+    _sel_idx  = st.selectbox(
+        "Modello",
+        options=range(len(_model_options)),
+        format_func=lambda i: _model_labels[i],
+        index=_cur_idx,
+        label_visibility="collapsed",
+    )
+    _sel_model = _model_options[_sel_idx]
+    if _sel_model != _cur_pref:
+        st.session_state["ai_model_pref"] = _sel_model
+        st.rerun()
+    # Nota info modello
+    _notes = {
+        "auto":                         "Sceglie automaticamente il modello migliore disponibile.",
+        "gemini-2.5-pro-preview-05-06": "Migliore qualità, più lento. Ideale per analisi approfondite.",
+        "gemini-2.0-flash":             "Ottimo equilibrio velocità/qualità. Consigliato.",
+        "gemini-2.0-flash-lite":        "Molto veloce, qualità leggermente inferiore.",
+        "gemini-1.5-flash":             "Fallback affidabile se i modelli 2.x sono esauriti.",
+        "gemini-1.5-pro":               "Buona qualità, compatibile con SDK vecchio.",
+        "grok-3-fast":                  "Richiede XAI_API_KEY nei Secrets.",
+        "grok-3":                       "Richiede XAI_API_KEY nei Secrets.",
+    }
+    st.markdown(f'<div style="font-size:12px;color:#888;margin-top:4px">ℹ️ {_notes.get(_sel_model,"")}</div>',
+                unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # Parametri fisiologici
     st.markdown('<div class="mob-card"><div class="mob-card-title">⚙️ Parametri Fisiologici</div>',
