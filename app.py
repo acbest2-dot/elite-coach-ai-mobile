@@ -628,6 +628,76 @@ def gsheet_load_profile() -> dict:
     except Exception:
         return {}
 
+def gsheet_save_conversations(messages: list):
+    """Salva le ultime 50 conversazioni nel tab 'conversations'."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return
+    try:
+        try:
+            ws = sheet.worksheet("conversations")
+        except Exception:
+            ws = sheet.add_worksheet(title="conversations", rows=200, cols=4)
+        rows = [["timestamp","role","content","session"]]
+        session_id = datetime.now().strftime("%Y%m%d")
+        for m in messages[-50:]:
+            rows.append([
+                datetime.now().isoformat(),
+                m.get("role",""),
+                str(m.get("content",""))[:2000],
+                session_id,
+            ])
+        ws.clear()
+        ws.update(rows, "A1")
+    except Exception:
+        pass
+
+def gsheet_load_conversations() -> list:
+    """Carica conversazioni salvate. Ritorna lista messaggi."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return []
+    try:
+        ws = sheet.worksheet("conversations")
+        records = ws.get_all_records()
+        return [{"role": r["role"], "content": r["content"]}
+                for r in records if r.get("role") and r.get("content")]
+    except Exception:
+        return []
+
+def gsheet_save_weekly_plan(plan: str):
+    """Salva il piano settimanale nel tab 'weekly_plan'."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return
+    try:
+        try:
+            ws = sheet.worksheet("weekly_plan")
+        except Exception:
+            ws = sheet.add_worksheet(title="weekly_plan", rows=20, cols=3)
+        ws.clear()
+        ws.update([["generated_at","plan"],
+                   [datetime.now().isoformat(), plan]], "A1")
+    except Exception:
+        pass
+
+def gsheet_load_weekly_plan() -> tuple:
+    """Carica piano settimanale. Ritorna (piano_str, data_generazione) o (None, None)."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return None, None
+    try:
+        ws   = sheet.worksheet("weekly_plan")
+        data = ws.get_all_values()
+        if len(data) < 2:
+            return None, None
+        ts   = data[1][0] if data[1][0] else None
+        plan = data[1][1] if len(data[1]) > 1 else None
+        dt   = datetime.fromisoformat(ts) if ts else None
+        return plan, dt
+    except Exception:
+        return None, None
+
 # ============================================================
 # STRAVA AUTH + FETCH
 # ============================================================
@@ -910,6 +980,32 @@ def ai_deep(prompt: str) -> str:
     return ai_generate(prompt, max_tokens=2000)
 
 # ============================================================
+# SPARKLINE SVG helper
+# ============================================================
+def make_sparkline_svg(values, color, width=80, height=32, show_zero_line=False) -> str:
+    """Genera un mini SVG sparkline da una lista di valori."""
+    if not values or len(values) < 2:
+        return ""
+    vals = list(values)
+    mn, mx = min(vals), max(vals)
+    rng = mx - mn if mx != mn else 1
+    pad = 3
+    def _x(i):  return round(pad + i * (width - 2*pad) / (len(vals)-1), 1)
+    def _y(v):  return round(height - pad - (v - mn) / rng * (height - 2*pad), 1)
+    pts = " ".join(f"{_x(i)},{_y(v)}" for i,v in enumerate(vals))
+    zero_line = ""
+    if show_zero_line and mn < 0 < mx:
+        zy = _y(0)
+        zero_line = f'<line x1="{pad}" y1="{zy}" x2="{width-pad}" y2="{zy}" stroke="#ccc" stroke-width="0.8" stroke-dasharray="2,2"/>'
+    return (f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+            f'xmlns="http://www.w3.org/2000/svg">'
+            f'{zero_line}'
+            f'<polyline points="{pts}" fill="none" stroke="{color}" '
+            f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<circle cx="{_x(len(vals)-1)}" cy="{_y(vals[-1])}" r="2.5" fill="{color}"/>'
+            f'</svg>')
+
+# ============================================================
 # CONTESTO AI — builder functions
 # ============================================================
 
@@ -1042,6 +1138,43 @@ def build_chat_context(df, u, current_ctl, current_atl, current_tsb,
         ctx += "\n\n=== STORICO MENSILE PRECEDENTE ===\n" + "\n".join(monthly)
     return ctx
 
+def build_daily_briefing(df, u, current_ctl, current_atl, current_tsb,
+                         status_label, vo2max_val) -> str:
+    """
+    Genera il briefing giornaliero del coach.
+    Analizza: stato forma, ultima settimana, suggerisce la sessione di oggi.
+    """
+    ftp  = u.get("ftp", 200)
+    now  = df["start_date"].max()
+    df7  = df[df["start_date"] >= now - pd.Timedelta(days=7)]
+    df28 = df[df["start_date"] >= now - pd.Timedelta(days=28)]
+    last = df.iloc[-1]
+    s_last = get_sport_info(last["type"])
+    m_last = format_metrics(last)
+    days_since_last = (datetime.now() - last["start_date"]).days
+
+    lines_b = [
+        "Sei un coach sportivo d'elite, diretto e asciutto. Rispondi in italiano. Massimo 3 frasi.",
+        "",
+        "ATLETA: " + str(u.get("eta",33)) + "a " + str(u.get("peso",75)) + "kg "
+            "FTP=" + str(ftp) + "W FCmax=" + str(u["fc_max"]) + "bpm",
+        "FORMA: CTL=" + str(round(current_ctl)) + " ATL=" + str(round(current_atl))
+            + " TSB=" + str(round(current_tsb,1)) + " stato=" + status_label,
+        "ULTIMA USCITA: " + str(days_since_last) + "gg fa "
+            + s_last["label"] + " " + m_last["dist_str"] + " TSS=" + str(round(last["tss"])),
+        "7gg: " + str(len(df7)) + " sess TSS=" + str(round(df7["tss"].sum())),
+        "28gg: " + str(len(df28)) + " sess TSS=" + str(round(df28["tss"].sum()))
+            + " km=" + str(round(df28["distance"].sum()/1000)),
+        "",
+        "Briefing oggi: 1 frase stato forma, 1 frase cosa fare oggi (tipo sessione, durata, zona target). "
+        "Usa numeri specifici. Niente preamboli.",
+    ]
+    ctx = "\n".join(lines_b)
+    return ai_generate(ctx)
+
+def get_daily_briefing_key() -> str:
+    return "daily_brief_" + datetime.now().strftime("%Y%m%d")
+
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -1056,6 +1189,9 @@ for key, val in {
     "selected_act_id":    None,
     "gsheet_loaded":      False,
     "ai_model_pref":      "auto",
+    "conv_loaded":        False,
+    "weekly_plan":        None,
+    "weekly_plan_date":   None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -1231,6 +1367,21 @@ for col in ["average_heartrate","max_heartrate","average_watts",
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
 u = st.session_state.user_data
+
+# Carica conversazioni salvate (una volta per sessione)
+if _gsheet_ok and not st.session_state.get("conv_loaded") and not st.session_state.messages:
+    _saved_conv = gsheet_load_conversations()
+    if _saved_conv:
+        st.session_state.messages = _saved_conv
+    st.session_state.conv_loaded = True
+
+# Carica piano settimanale salvato
+if _gsheet_ok and st.session_state.get("weekly_plan") is None:
+    _saved_plan, _saved_plan_dt = gsheet_load_weekly_plan()
+    if _saved_plan:
+        st.session_state.weekly_plan      = _saved_plan
+        st.session_state.weekly_plan_date = _saved_plan_dt
+
 df["tss"] = df.apply(lambda row: calc_tss(row, u), axis=1)
 ctl_s, atl_s, tsb_s, ctl_daily, atl_daily, tsb_daily, tss_daily = compute_fitness(df)
 df["ctl"]        = ctl_s.values
@@ -1308,7 +1459,7 @@ if st.session_state.selected_act_id is not None:
         c1, c2, c3 = st.columns(3)
         c1.metric("📏 Distanza", m["dist_str"])
         c2.metric("⏱️ Durata",   m["dur_str"])
-        c3.metric("⚡ Ritmo",    m["pace_str"])
+        c3.metric("⚡ Vel. media", m["pace_str"])
         c4, c5, c6 = st.columns(3)
         c4.metric("⛰️ D+",       m["elev"])
         c5.metric("❤️ FC avg",   m["hr_avg"])
@@ -1541,94 +1692,88 @@ if st.session_state.selected_act_id is not None:
 # ============================================================
 if st.session_state.mob_menu == "dashboard":
 
-    # ── Calcola delta 7gg fa ──
-    _7d_ago_idx = df[df["start_date"] <= df["start_date"].max() - pd.Timedelta(days=7)]
-    if not _7d_ago_idx.empty:
-        _ctl_7d = float(_7d_ago_idx["ctl"].iloc[-1])
-        _atl_7d = float(_7d_ago_idx["atl"].iloc[-1])
-        _tsb_7d = float(_7d_ago_idx["tsb"].iloc[-1])
-    else:
-        _ctl_7d = _atl_7d = _tsb_7d = None
+    # ── Sparkline CTL/ATL/TSB — numeri grandi + mini trend 14gg ──
+    _spark_days = 14
+    _spark_data = pd.DataFrame({
+        "ctl": ctl_daily, "atl": atl_daily, "tsb": tsb_daily,
+    }).dropna().tail(_spark_days)
 
-    # ── Metriche CTL / ATL / TSB ── pre-calcola tutto prima della f-string ──
+    _ctl_vals = list(_spark_data["ctl"]) if not _spark_data.empty else [current_ctl]
+    _atl_vals = list(_spark_data["atl"]) if not _spark_data.empty else [current_atl]
+    _tsb_vals = list(_spark_data["tsb"]) if not _spark_data.empty else [current_tsb]
+
+    # Delta vs 7gg fa
+    _7d_ago = df[df["start_date"] <= df["start_date"].max() - pd.Timedelta(days=7)]
+    def _delta_html(cur, series_7d):
+        if series_7d.empty: return ""
+        old = float(series_7d.iloc[-1])
+        d = cur - old
+        arrow = "&#8593;" if d > 0.5 else "&#8595;" if d < -0.5 else "&#8594;"
+        col = "#4CAF50" if d > 0.5 else "#F44336" if d < -0.5 else "#aaa"
+        return f'<span style="color:{col};font-size:11px">{arrow}{abs(d):.0f}</span>'
+
+    _dh_ctl = _delta_html(current_ctl, _7d_ago["ctl"] if not _7d_ago.empty else pd.Series())
+    _dh_atl = _delta_html(current_atl, _7d_ago["atl"] if not _7d_ago.empty else pd.Series())
+    _dh_tsb = _delta_html(current_tsb, _7d_ago["tsb"] if not _7d_ago.empty else pd.Series())
+
     ctl_color = "#4CAF50" if current_ctl > 60 else "#FF9800" if current_ctl > 40 else "#F44336"
     tsb_color = "#4CAF50" if current_tsb > 5 else "#FF9800" if current_tsb > -15 else "#F44336"
     atl_color = "#FF9800" if current_atl > current_ctl * 1.1 else "#4CAF50"
 
-    def _mk_delta(cur, old):
-        if old is None: return ""
-        d = cur - old
-        arrow = "&#8593;" if d > 0.5 else "&#8595;" if d < -0.5 else "&#8594;"
-        col = "#4CAF50" if d > 0.5 else "#F44336" if d < -0.5 else "#888"
-        return f'<span style="font-size:11px;color:{col}">{arrow}{abs(d):.0f} vs 7gg</span>'
-
-    _d_ctl = _mk_delta(current_ctl, _ctl_7d)
-    _d_tsb = _mk_delta(current_tsb, _tsb_7d)
-    _d_atl = _mk_delta(current_atl, _atl_7d)
+    _svg_ctl = make_sparkline_svg(_ctl_vals, ctl_color, width=88, height=30)
+    _svg_atl = make_sparkline_svg(_atl_vals, atl_color, width=88, height=30)
+    _svg_tsb = make_sparkline_svg(_tsb_vals, tsb_color, width=88, height=30, show_zero_line=True)
 
     _last7 = df[df["start_date"] >= df["start_date"].max() - pd.Timedelta(days=7)]
-    _tss7  = f"{_last7['tss'].sum():.0f}"
+    _tss7  = str(round(_last7["tss"].sum()))
     _n7    = str(len(_last7))
 
-    _ctl_val = f"{current_ctl:.0f}"
-    _tsb_val = f"{current_tsb:+.0f}"
-    _atl_val = f"{current_atl:.0f}"
+    def _spark_card(val_str, label, sub, color, delta_html, svg):
+        return (
+            f'<div style="flex:1;background:#f8f9fa;border-radius:14px;padding:12px 10px;'
+            f'border-top:3px solid {color};">' 
+            f'<div style="font-size:30px;font-weight:900;color:{color};line-height:1">{val_str}</div>'
+            f'<div style="font-size:11px;font-weight:700;color:#333;margin:3px 0 0">{label}</div>'
+            f'<div style="font-size:10px;color:#aaa;margin-bottom:6px">{sub}</div>'
+            f'<div style="line-height:0">{svg}</div>'
+            f'<div style="margin-top:4px">{delta_html} <span style="font-size:10px;color:#ccc">vs 7gg</span></div>'
+            f'</div>'
+        )
+
+    _card_ctl = _spark_card(f"{current_ctl:.0f}", "CTL", "Fitness cronico", ctl_color, _dh_ctl, _svg_ctl)
+    _card_tsb = _spark_card(f"{current_tsb:+.0f}", "TSB", "&gt;5 fresco", tsb_color, _dh_tsb, _svg_tsb)
+    _card_atl = _spark_card(f"{current_atl:.0f}", "ATL", "Fatica 7gg", atl_color, _dh_atl, _svg_atl)
 
     st.markdown(
-        f'''<div class="mob-card">
-        <div class="mob-card-title">&#128200; Stato Forma &middot; <span style="font-weight:400">{status_label}</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:8px 0">
-          <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
-            <div style="font-size:32px;font-weight:900;color:{ctl_color};line-height:1">{_ctl_val}</div>
-            <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">CTL &middot; Fitness</div>
-            <div style="font-size:10px;color:#888;line-height:1.3">Forma cronica<br>42 giorni</div>
-            {_d_ctl}
-          </div>
-          <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
-            <div style="font-size:32px;font-weight:900;color:{tsb_color};line-height:1">{_tsb_val}</div>
-            <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">TSB &middot; Forma</div>
-            <div style="font-size:10px;color:#888;line-height:1.3">&gt;5 fresco &lt;-20 stanco</div>
-            {_d_tsb}
-          </div>
-          <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
-            <div style="font-size:32px;font-weight:900;color:{atl_color};line-height:1">{_atl_val}</div>
-            <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">ATL &middot; Fatica</div>
-            <div style="font-size:10px;color:#888;line-height:1.3">Carico acuto<br>7 giorni</div>
-            {_d_atl}
-          </div>
-        </div>
-        <div style="font-size:11px;color:#aaa;text-align:center;padding:4px 0">
-          TSS ultimi 7gg: <b style="color:#555">{_tss7}</b> &middot; attivit&agrave;: <b style="color:#555">{_n7}</b>
-        </div>
-        </div>''',
-        unsafe_allow_html=True)
-
-    # ── Grafico fitness 30gg ──
-    st.markdown('<div class="mob-card"><div class="mob-card-title">📊 Fitness ultimi 30 giorni</div>',
-                unsafe_allow_html=True)
-    chart_df = pd.DataFrame({
-        "Fitness (CTL)": ctl_daily,
-        "Fatica (ATL)":  atl_daily,
-        "Forma (TSB)":   tsb_daily,
-    }).dropna().tail(30)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df["Fitness (CTL)"],
-        name="CTL", line=dict(color="#4CAF50", width=2)))
-    fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df["Fatica (ATL)"],
-        name="ATL", line=dict(color="#F44336", width=2)))
-    fig.add_trace(go.Scatter(x=chart_df.index, y=chart_df["Forma (TSB)"],
-        name="TSB", line=dict(color="#2196F3", width=2),
-        fill="tozeroy", fillcolor="rgba(33,150,243,0.08)"))
-    fig.add_hline(y=0, line_dash="dot", line_color="#aaa", line_width=1)
-    fig.update_layout(
-        height=200, margin=dict(l=0,r=0,t=8,b=0),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", y=-0.2, font_size=11),
-        xaxis=dict(gridcolor="rgba(0,0,0,0.05)", tickfont_size=10),
-        yaxis=dict(gridcolor="rgba(0,0,0,0.05)", tickfont_size=10),
+        '<div class="mob-card">' +
+        f'<div class="mob-card-title">&#128200; Stato Forma &middot; {status_label}</div>' +
+        '<div style="display:flex;gap:8px;margin:8px 0">' +
+        _card_ctl + _card_tsb + _card_atl +
+        '</div>' +
+        f'<div style="font-size:11px;color:#aaa;text-align:center;padding:2px 0">'
+        f'TSS 7gg: <b style="color:#555">{_tss7}</b> &middot; sessioni: <b style="color:#555">{_n7}</b>'
+        f'</div></div>',
+        unsafe_allow_html=True
     )
-    st.plotly_chart(fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Briefing giornaliero ──
+    if _ai_sdk_mode is not None:
+        _bkey = get_daily_briefing_key()
+        if _bkey not in st.session_state:
+            with st.spinner("&#129302; Briefing coach..."):
+                _brief = build_daily_briefing(
+                    df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val)
+                st.session_state[_bkey] = _brief
+                st.rerun()
+        if _bkey in st.session_state:
+            _bt = st.session_state[_bkey]
+            if not _bt.startswith("⚠️"):
+                st.markdown(
+                    '<div class="ai-box" style="margin:8px 12px 0;border-left-color:#1565C0">' +
+                    '<div style="font-size:10px;font-weight:700;color:#1565C0;margin-bottom:4px">'
+                    '&#129302; BRIEFING COACH &middot; OGGI</div>' +
+                    _bt + '</div>',
+                    unsafe_allow_html=True)
 
     # ── Ultime 5 attività ──
     st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 4px;color:#1a1a1a">&#127885; Ultime attività</h4></div>',
@@ -1663,7 +1808,7 @@ if st.session_state.mob_menu == "dashboard":
             f'<div class="act-pills" style="margin-top:6px">' +
             f'<span class="act-pill">&#128207; <b>{_dist5}</b></span>' +
             f'<span class="act-pill">&#9201;&#65039; <b>{_dur5}</b></span>' +
-            f'<span class="act-pill">&#9889; <b>{_pace5}</b></span>' +
+            f'<span class="act-pill">&#9889; Vel. <b>{_pace5}</b></span>' +
             f'<span class="act-pill">&#9968;&#65039; <b>{_elev5}</b></span>' +
             f'<span class="act-pill">&#10084;&#65039; <b>{_hr5} bpm</b></span>' +
             f'<span class="act-pill">TSS <b>{_tss5}</b></span>' +
@@ -1800,6 +1945,61 @@ elif st.session_state.mob_menu == "fitness":
     )
     st.plotly_chart(fig3, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Piano settimanale AI ──
+    if _ai_sdk_mode is not None:
+        st.markdown('<div class="mob-card"><div class="mob-card-title">&#128197; Piano Settimana</div>',
+                    unsafe_allow_html=True)
+        _plan = st.session_state.get("weekly_plan")
+        _plan_dt = st.session_state.get("weekly_plan_date")
+        _plan_age = (datetime.now() - _plan_dt).days if _plan_dt else 999
+
+        if _plan and _plan_age < 7:
+            _plan_date_str = _plan_dt.strftime("%d/%m") if _plan_dt else ""
+            st.markdown(
+                f'<div style="font-size:10px;color:#aaa;margin-bottom:6px">'
+                f'Generato il {_plan_date_str} &middot; valido fino a {(_plan_dt + timedelta(days=7)).strftime("%d/%m") if _plan_dt else "?"}</div>',
+                unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ai-box" style="border-left-color:#9C27B0">' + _plan + '</div>',
+                unsafe_allow_html=True)
+            if st.button("&#128260; Rigenera piano", use_container_width=True, key="regen_plan"):
+                st.session_state.weekly_plan      = None
+                st.session_state.weekly_plan_date = None
+                st.rerun()
+        else:
+            if st.button("&#128197; Genera Piano Settimanale", use_container_width=True,
+                         type="primary", key="gen_plan"):
+                with st.spinner("Il coach costruisce il piano..."):
+                    df7p  = df[df["start_date"] >= df["start_date"].max() - pd.Timedelta(days=7)]
+                    df28p = df[df["start_date"] >= df["start_date"].max() - pd.Timedelta(days=28)]
+                    avg_tss_day = df28p["tss"].sum() / 28 if not df28p.empty else 50
+
+                    _plan_lines = [
+                        "Sei un coach sportivo d'elite. Rispondi in italiano.",
+                        "Crea un piano di allenamento per i prossimi 7 giorni.",
+                        "",
+                        "ATLETA: " + str(u.get("eta",33)) + " anni " + str(u.get("peso",75)) + "kg",
+                        "FTP=" + str(u.get("ftp",200)) + "W FCmax=" + str(u["fc_max"]) + "bpm",
+                        "CTL=" + str(round(current_ctl)) + " ATL=" + str(round(current_atl))
+                            + " TSB=" + str(round(current_tsb,1)) + " stato=" + status_label,
+                        "VO2max: " + str(vo2max_val or "N/D") + " ml/kg/min",
+                        "TSS medio/giorno (28gg): " + str(round(avg_tss_day)),
+                        "Ultima settimana: " + str(len(df7p)) + " sessioni TSS=" + str(round(df7p["tss"].sum())),
+                        "Sport: ciclismo, trail running, sci alpinismo",
+                        "",
+                        "Piano 7 giorni (Lun-Dom). Per ogni giorno: tipo sessione o riposo, "
+                        "durata, zona target, TSS stimato. "
+                        "Formato bullet point. Nota finale su carico totale previsto.",
+                    ]
+                    plan_ctx = "\n".join(_plan_lines)
+                    _new_plan = ai_deep(plan_ctx)
+                    st.session_state.weekly_plan      = _new_plan
+                    st.session_state.weekly_plan_date = datetime.now()
+                    if _gsheet_ok:
+                        gsheet_save_weekly_plan(_new_plan)
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # Analisi fisiologica AI
     st.markdown('<div class="mob-card"><div class="mob-card-title">🤖 Analisi Fisiologica</div>',
@@ -2016,10 +2216,13 @@ elif st.session_state.mob_menu == "chat":
                 df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val
             )
         _ctx_sys = (
-            "Sei un coach sportivo d'élite specializzato in ciclismo, trail running e sci alpinismo. "
-            "Rispondi sempre in italiano, in modo conciso, pratico e basato sui dati. "
-            "Usa i numeri specifici quando disponibili. "
-            "Niente frasi generiche: sii diretto come un coach professionista.\n\n"
+            "Sei un coach sportivo d'elite specializzato in ciclismo, trail running e sci alpinismo. "
+            "Sei sia ANALISTA (spieghi i dati, le cause, i trend) "
+            "che PROGRAMMATORE (piani concreti, sessioni specifiche, carichi con numeri). "
+            "Personalita: diretto, asciutto, professionale. Zero frasi motivazionali generiche. "
+            "Rispondi sempre in italiano. Usa sempre i numeri disponibili. "
+            "Se ti chiedono un piano: sessioni con tipo, durata, zona target, TSS stimato. "
+            "Se ti chiedono un'analisi: usa CTL/ATL/TSB/TSS/watt/FC con valori precisi.\n\n"
             + st.session_state["chat_ctx_cache"]
         )
 
@@ -2048,12 +2251,12 @@ elif st.session_state.mob_menu == "chat":
                 if st.button(qp, use_container_width=True, key=f"qp_{i}"):
                     st.session_state.messages.append({"role":"user","content":qp})
                     with st.spinner("Il coach risponde..."):
-                        history = "\n".join([
-                            f"{'Atleta' if m['role']=='user' else 'Coach'}: {m['content']}"
-                            for m in st.session_state.messages[-6:]
-                        ])
-                        res = ai_generate(f"{_ctx_sys}\n\nConversazione:\n{history}")
+                        _hlines = [("Atleta" if _m["role"]=="user" else "Coach") + ": " + str(_m["content"])
+                                   for _m in st.session_state.messages[-10:]]
+                        res = ai_deep(_ctx_sys + "\n\n=== CONVERSAZIONE ===\n" + "\n".join(_hlines))
                         st.session_state.messages.append({"role":"assistant","content":res})
+                    if _gsheet_ok:
+                        gsheet_save_conversations(st.session_state.messages)
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2061,12 +2264,12 @@ elif st.session_state.mob_menu == "chat":
         if prompt := st.chat_input("Scrivi al tuo coach..."):
             st.session_state.messages.append({"role":"user","content":prompt})
             with st.spinner("Il coach risponde..."):
-                history = "\n".join([
-                    f"{'Atleta' if m['role']=='user' else 'Coach'}: {m['content']}"
-                    for m in st.session_state.messages[-8:]
-                ])
-                res = ai_generate(f"{_ctx_sys}\n\nConversazione:\n{history}")
+                _hlines2 = [("Atleta" if _m["role"]=="user" else "Coach") + ": " + str(_m["content"])
+                            for _m in st.session_state.messages[-12:]]
+                res = ai_deep(_ctx_sys + "\n\n=== CONVERSAZIONE ===\n" + "\n".join(_hlines2))
                 st.session_state.messages.append({"role":"assistant","content":res})
+            if _gsheet_ok:
+                gsheet_save_conversations(st.session_state.messages)
             st.rerun()
 
         if st.session_state.messages:
