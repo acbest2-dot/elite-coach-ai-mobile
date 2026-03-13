@@ -1,0 +1,16 @@
+streamlit
+requests
+pandas
+numpy
+python-dotenv
+google-genai>=1.0.0
+polyline
+folium
+streamlit-folium
+plotly
+streamlit-calendar
+openai
+
+
+
+
