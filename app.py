@@ -14,7 +14,7 @@ import calendar as cal_module
 # ============================================================
 # CONFIGURAZIONE
 # ============================================================
-REDIRECT_URI = "https://elite-ai-coach-mobile.streamlit.app"  # ← aggiorna con il tuo URL mobile
+REDIRECT_URI = "https://elite-ai-coach-mobile.streamlit.app/"  # ← aggiorna con il tuo URL mobile
 
 def get_secret(key):
     return st.secrets.get(key) or os.getenv(key)
