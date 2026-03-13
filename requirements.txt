@@ -8,9 +8,6 @@ polyline
 folium
 streamlit-folium
 plotly
-streamlit-calendar
-openai
-
-
-
-
+gspread
+google-auth
+google-auth-oauthlib
