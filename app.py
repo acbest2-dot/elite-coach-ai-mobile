@@ -1141,36 +1141,81 @@ def build_chat_context(df, u, current_ctl, current_atl, current_tsb,
 def build_daily_briefing(df, u, current_ctl, current_atl, current_tsb,
                          status_label, vo2max_val) -> str:
     """
-    Genera il briefing giornaliero del coach.
-    Analizza: stato forma, ultima settimana, suggerisce la sessione di oggi.
+    Genera il briefing giornaliero del coach — ricco e contestualizzato.
     """
     ftp  = u.get("ftp", 200)
     now  = df["start_date"].max()
     df7  = df[df["start_date"] >= now - pd.Timedelta(days=7)]
+    df14 = df[df["start_date"] >= now - pd.Timedelta(days=14)]
     df28 = df[df["start_date"] >= now - pd.Timedelta(days=28)]
     last = df.iloc[-1]
     s_last = get_sport_info(last["type"])
     m_last = format_metrics(last)
     days_since_last = (datetime.now() - last["start_date"]).days
 
+    # Trend CTL ultimi 14gg
+    _spark14 = df[df["start_date"] >= now - pd.Timedelta(days=14)]
+    ctl_trend = "stabile"
+    if len(_spark14) >= 2:
+        _ctl_start = float(_spark14["ctl"].iloc[0])
+        _ctl_end   = float(_spark14["ctl"].iloc[-1])
+        _delta = _ctl_end - _ctl_start
+        if _delta > 3:   ctl_trend = "in crescita (+" + str(round(_delta)) + ")"
+        elif _delta < -3: ctl_trend = "in calo (" + str(round(_delta)) + ")"
+
+    # Sport mix ultimi 28gg
+    sport_mix = df28["type"].value_counts().head(3)
+    sport_str = " | ".join([str(k) + "=" + str(v) for k,v in sport_mix.items()])
+
+    # Ultime 3 sessioni
+    last3_lines = []
+    for _, r3 in df.iloc[-3:].iterrows():
+        s3 = get_sport_info(r3["type"])
+        m3 = format_metrics(r3)
+        last3_lines.append(
+            "  " + r3["start_date"].strftime("%d/%m") + " " + s3["icon"] +
+            " " + m3["dist_str"] + " " + m3["dur_str"] +
+            " TSS=" + str(round(r3["tss"])) +
+            " FC=" + m3["hr_avg"]
+        )
+
     lines_b = [
-        "Sei un coach sportivo d'elite, diretto e asciutto. Rispondi in italiano. Massimo 3 frasi.",
+        "Sei un coach sportivo d'elite specializzato in ciclismo, trail running e sci alpinismo.",
+        "Rispondi in italiano. Diretto e asciutto. Usa i numeri.",
         "",
-        "ATLETA: " + str(u.get("eta",33)) + "a " + str(u.get("peso",75)) + "kg "
-            "FTP=" + str(ftp) + "W FCmax=" + str(u["fc_max"]) + "bpm",
-        "FORMA: CTL=" + str(round(current_ctl)) + " ATL=" + str(round(current_atl))
-            + " TSB=" + str(round(current_tsb,1)) + " stato=" + status_label,
-        "ULTIMA USCITA: " + str(days_since_last) + "gg fa "
+        "=== ATLETA ===",
+        str(u.get("eta",33)) + " anni | " + str(u.get("peso",75)) + "kg | "
+            "FTP=" + str(ftp) + "W | FCmax=" + str(u["fc_max"]) + "bpm | "
+            "VO2max=" + str(vo2max_val or "N/D") + " ml/kg/min",
+        "",
+        "=== FORMA ATTUALE ===",
+        "CTL=" + str(round(current_ctl)) + " (" + ctl_trend + ") | "
+            "ATL=" + str(round(current_atl)) + " | "
+            "TSB=" + str(round(current_tsb,1)) + " | " + status_label,
+        "Ultima uscita: " + str(days_since_last) + "gg fa — "
             + s_last["label"] + " " + m_last["dist_str"] + " TSS=" + str(round(last["tss"])),
-        "7gg: " + str(len(df7)) + " sess TSS=" + str(round(df7["tss"].sum())),
-        "28gg: " + str(len(df28)) + " sess TSS=" + str(round(df28["tss"].sum()))
-            + " km=" + str(round(df28["distance"].sum()/1000)),
         "",
-        "Briefing oggi: 1 frase stato forma, 1 frase cosa fare oggi (tipo sessione, durata, zona target). "
-        "Usa numeri specifici. Niente preamboli.",
+        "=== CARICO RECENTE ===",
+        "7gg:  " + str(len(df7)) + " sess | TSS=" + str(round(df7["tss"].sum()))
+            + " | km=" + str(round(df7["distance"].sum()/1000)),
+        "14gg: " + str(len(df14)) + " sess | TSS=" + str(round(df14["tss"].sum())),
+        "28gg: " + str(len(df28)) + " sess | TSS=" + str(round(df28["tss"].sum()))
+            + " | km=" + str(round(df28["distance"].sum()/1000)),
+        "Sport mix 28gg: " + sport_str,
+        "",
+        "=== ULTIME 3 SESSIONI ===",
+    ] + last3_lines + [
+        "",
+        "=== RICHIESTA ===",
+        "Scrivi un briefing giornaliero in 4-5 frasi:",
+        "1) Stato forma attuale con interpretazione dei numeri CTL/ATL/TSB",
+        "2) Analisi della settimana appena passata (qualita e quantita del carico)",
+        "3) Cosa fare OGGI: tipo di sessione, durata, zona, TSS target",
+        "4) Una nota su cosa tenere d'occhio nei prossimi giorni",
+        "Sii specifico con i numeri. Niente frasi di incoraggiamento generiche.",
     ]
     ctx = "\n".join(lines_b)
-    return ai_generate(ctx)
+    return ai_deep(ctx)
 
 def get_daily_briefing_key() -> str:
     return "daily_brief_" + datetime.now().strftime("%Y%m%d")
@@ -1468,27 +1513,54 @@ if st.session_state.selected_act_id is not None:
 
         # Mappa 2D / 3D
         import streamlit.components.v1 as _components
-        poly = row.get("map", {})
-        poly = poly.get("summary_polyline") if isinstance(poly, dict) else None
+        def _get_polyline(row_data):
+            """Estrae summary_polyline gestendo dict, stringa JSON o stringa diretta."""
+            _map = row_data.get("map", {})
+            if isinstance(_map, dict):
+                return _map.get("summary_polyline") or None
+            if isinstance(_map, str) and _map.strip():
+                # Potrebbe essere JSON serializzato da GSheet
+                try:
+                    _parsed = json.loads(_map)
+                    if isinstance(_parsed, dict):
+                        return _parsed.get("summary_polyline") or None
+                except Exception:
+                    pass
+                # O direttamente la polyline
+                if len(_map) > 10:
+                    return _map
+            # Prova anche il campo diretto (alcuni dataset GSheet lo appiattiscono)
+            _sp = row_data.get("map.summary_polyline") or row_data.get("summary_polyline")
+            if isinstance(_sp, str) and len(_sp) > 10:
+                return _sp
+            return None
+
+        poly = _get_polyline(row)
         if poly:
             if MAPBOX_TOKEN:
                 _t2d, _t3d = st.tabs(["🗺️ Mappa 2D", "🏔️ Mappa 3D"])
                 with _t2d:
-                    mobj = draw_map(poly, height=220)
+                    mobj = draw_map(poly, height=230)
                     if mobj:
-                        st_folium(mobj, width=None, height=220, key="det_map_2d")
+                        st_folium(mobj, width=None, height=230, key=f"det_map_2d_{_aid}")
+                    else:
+                        st.info("Tracciato GPS non disponibile.")
                 with _t3d:
-                    _eg   = float(row.get("total_elevation_gain") or 0)
-                    _h3d  = build_map3d_html(poly, MAPBOX_TOKEN,
-                                             sport_type=row.get("type",""), elev_gain=_eg, height=320)
+                    _eg  = float(row.get("total_elevation_gain") or 0)
+                    _h3d = build_map3d_html(poly, MAPBOX_TOKEN,
+                                            sport_type=row.get("type",""), elev_gain=_eg, height=320)
                     if _h3d:
                         _components.html(_h3d, height=330, scrolling=False)
+                    else:
+                        st.info("Configura MAPBOX_TOKEN nei Secrets per la mappa 3D.")
             else:
-                mobj = draw_map(poly, height=220)
+                mobj = draw_map(poly, height=230)
                 if mobj:
-                    st.markdown('<div style="margin:8px 12px 0">', unsafe_allow_html=True)
-                    st_folium(mobj, width=None, height=220, key="det_map")
-                    st.markdown('</div>', unsafe_allow_html=True)
+                    st_folium(mobj, width=None, height=230, key=f"det_map_{_aid}")
+                else:
+                    st.info("Tracciato GPS non disponibile.")
+        else:
+            st.info("Nessun tracciato GPS per questa attività.")
 
         # Zone FC — stile Garmin con barre orizzontali
         hr_avg = row.get("average_heartrate")
@@ -1822,8 +1894,17 @@ if st.session_state.mob_menu == "dashboard":
 
         # Solo prima attività: mappa + AI
         if _is_first:
-            _poly5 = _row5.get("map", {})
-            _poly5 = _poly5.get("summary_polyline") if isinstance(_poly5, dict) else None
+            _poly5 = _get_polyline(_row5) if "_get_polyline" in dir() else None
+            if _poly5 is None:
+                # Fallback inline se _get_polyline non ancora definita
+                _pm = _row5.get("map", {})
+                if isinstance(_pm, dict):
+                    _poly5 = _pm.get("summary_polyline")
+                elif isinstance(_pm, str) and len(_pm) > 10:
+                    try:
+                        _poly5 = json.loads(_pm).get("summary_polyline")
+                    except Exception:
+                        _poly5 = _pm
             if _poly5:
                 _mobj5 = draw_map(_poly5)
                 if _mobj5:
