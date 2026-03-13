@@ -569,6 +569,43 @@ def gsheet_needs_sync() -> bool:
         return True
     return (datetime.now() - last) > timedelta(hours=24)
 
+def gsheet_save_profile(profile: dict):
+    """Salva profilo utente (peso, FC, FTP, età) nel tab 'user_profile'."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return
+    try:
+        try:
+            ws = sheet.worksheet("user_profile")
+        except Exception:
+            ws = sheet.add_worksheet(title="user_profile", rows=20, cols=5)
+        rows = [["key","value"]] + [[k, str(v)] for k,v in profile.items()]
+        ws.clear()
+        ws.update(rows, "A1")
+    except Exception:
+        pass
+
+def gsheet_load_profile() -> dict:
+    """Carica profilo utente dal tab 'user_profile'. Ritorna {} se non trovato."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return {}
+    try:
+        ws = sheet.worksheet("user_profile")
+        records = ws.get_all_records()
+        profile = {}
+        type_map = {"peso": float, "fc_min": int, "fc_max": int, "ftp": int, "eta": int}
+        for r in records:
+            k, v = r.get("key",""), r.get("value","")
+            if k and v != "":
+                try:
+                    profile[k] = type_map.get(k, str)(v)
+                except Exception:
+                    profile[k] = v
+        return profile
+    except Exception:
+        return {}
+
 # ============================================================
 # STRAVA AUTH + FETCH
 # ============================================================
@@ -637,8 +674,70 @@ def fetch_athlete(access_token):
     return r.json() if r.status_code == 200 else {}
 
 # ============================================================
-# MAPPA 2D
+# MAPPA 2D + 3D
 # ============================================================
+def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0, height=340) -> str:
+    """Mappa Mapbox 3D compatta per mobile."""
+    if not encoded_polyline or not mapbox_token:
+        return None
+    try:
+        import json as _j
+        pts    = polyline.decode(encoded_polyline)
+        coords = [[lon, lat] for lat, lon in pts]
+        if len(coords) < 2:
+            return None
+        clon  = sum(c[0] for c in coords) / len(coords)
+        clat  = sum(c[1] for c in coords) / len(coords)
+        geoj  = _j.dumps({"type":"Feature","properties":{},
+                           "geometry":{"type":"LineString","coordinates":coords}})
+        start_j = _j.dumps(coords[0])
+        end_j   = _j.dumps(coords[-1])
+        line_color = ("#FF4B4B" if sport_type in ("Run","TrailRun") else
+                      "#4FC3F7" if sport_type in ("BackcountrySki","AlpineSki") else "#2196F3")
+        html = f"""<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+<style>
+  html,body,#map{{margin:0;padding:0;width:100%;height:{height}px;background:#000}}
+  .mapboxgl-ctrl-group{{background:rgba(0,0,0,0.5)!important;border:none!important}}
+  .mapboxgl-ctrl-group button{{background:rgba(255,255,255,0.15)!important;color:#fff!important}}
+</style></head><body>
+<div id="map"></div>
+<script>
+mapboxgl.accessToken = "{mapbox_token}";
+const map = new mapboxgl.Map({{
+  container:"map", style:"mapbox://styles/mapbox/satellite-streets-v12",
+  center:[{clon},{clat}], zoom:12, pitch:55, bearing:0,
+  antialias:true
+}});
+map.addControl(new mapboxgl.NavigationControl(),"top-right");
+map.on("load",()=>{{
+  map.addSource("dem",{{type:"raster-dem",url:"mapbox://mapbox.mapbox-terrain-dem-v1",tileSize:512}});
+  map.setTerrain({{"source":"dem","exaggeration":1.5}});
+  map.addLayer({{id:"sky",type:"sky",paint:{{"sky-type":"atmosphere","sky-atmosphere-sun":[0,60],"sky-atmosphere-sun-intensity":15}}}});
+  map.addSource("route",{{type:"geojson",data:{geoj}}});
+  map.addLayer({{id:"route-glow",type:"line",source:"route",
+    layout:{{"line-join":"round","line-cap":"round"}},
+    paint:{{"line-color":"{line_color}","line-width":6,"line-opacity":0.35,"line-blur":4}}}});
+  map.addLayer({{id:"route",type:"line",source:"route",
+    layout:{{"line-join":"round","line-cap":"round"}},
+    paint:{{"line-color":"{line_color}","line-width":3,"line-opacity":0.95}}}});
+  // Marker start
+  new mapboxgl.Marker({{color:"#4CAF50",scale:0.8}}).setLngLat({start_j}).addTo(map);
+  // Marker end
+  new mapboxgl.Marker({{color:"#F44336",scale:0.8}}).setLngLat({end_j}).addTo(map);
+  // Fit bounds
+  const coords = {_j.dumps(coords)};
+  const bounds = coords.reduce((b,c)=>b.extend(c), new mapboxgl.LngLatBounds(coords[0],coords[0]));
+  map.fitBounds(bounds,{{padding:40,duration:0}});
+}});
+</script></body></html>"""
+        return html
+    except Exception:
+        return None
+
 def draw_map(encoded_polyline, height=220):
     if not encoded_polyline:
         return None
@@ -660,41 +759,77 @@ def draw_map(encoded_polyline, height=220):
 # ============================================================
 # AI
 # ============================================================
+# Modelli flash in ordine di preferenza (più recente → più vecchio)
+_FLASH_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash-latest",
+]
+_PRO_MODELS = [
+    "gemini-2.5-pro-preview-05-06",
+    "gemini-2.5-pro-preview-03-25",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+]
+
+def _is_quota_error(e) -> bool:
+    s = str(e).lower()
+    return any(k in s for k in ["quota", "429", "resource_exhausted", "rate limit", "exceeded"])
+
 def ai_generate(prompt: str, max_tokens: int = 1500) -> str:
     if _ai_sdk_mode is None:
         return "⚠️ Nessun provider AI configurato. Aggiungi GOOGLE_API_KEY nei Secrets."
-    try:
-        if _ai_sdk_mode == "new":
-            resp = _ai_client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt,
-            )
-            return resp.text
-        elif _ai_sdk_mode == "old":
-            model = _ai_client.GenerativeModel("gemini-1.5-flash")
-            return model.generate_content(prompt).text
-        elif _ai_sdk_mode == "grok":
+    last_err = ""
+    if _ai_sdk_mode == "new":
+        for model in _FLASH_MODELS:
+            try:
+                resp = _ai_client.models.generate_content(model=model, contents=prompt)
+                return resp.text
+            except Exception as e:
+                last_err = str(e)
+                if _is_quota_error(e):
+                    continue  # prova il prossimo modello
+                break
+        if _is_quota_error(Exception(last_err)):
+            return ("⚠️ Quota AI esaurita per oggi su tutti i modelli flash. "
+                    "Riprova domani oppure aggiungi una nuova GOOGLE_API_KEY "
+                    "(puoi creare chiavi gratuite su aistudio.google.com).")
+        return f"⚠️ Errore AI: {last_err}"
+    elif _ai_sdk_mode == "old":
+        for m in ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash-8b"]:
+            try:
+                model = _ai_client.GenerativeModel(m)
+                return model.generate_content(prompt).text
+            except Exception as e:
+                last_err = str(e)
+                if _is_quota_error(e): continue
+                break
+        return f"⚠️ Errore AI: {last_err}"
+    elif _ai_sdk_mode == "grok":
+        try:
             resp = _ai_client.chat.completions.create(
                 model="grok-3-fast",
                 messages=[{"role":"user","content":prompt}],
                 max_tokens=max_tokens,
             )
             return resp.choices[0].message.content
-    except Exception as e:
-        return f"⚠️ Errore AI: {e}"
+        except Exception as e:
+            return f"⚠️ Errore AI: {e}"
+    return "⚠️ Provider AI non riconosciuto."
 
 def ai_deep(prompt: str) -> str:
-    """Analisi approfondita — Gemini 2.5 Pro con fallback."""
+    """Analisi approfondita — tenta Pro poi fallback su Flash."""
     if _ai_sdk_mode == "new":
-        for model in ["gemini-2.5-pro-preview-05-06", "gemini-2.5-pro-preview-03-25",
-                      "gemini-2.0-flash"]:
+        for model in _PRO_MODELS:
             try:
-                resp = _ai_client.models.generate_content(
-                    model=model, contents=prompt,
-                )
+                resp = _ai_client.models.generate_content(model=model, contents=prompt)
                 return resp.text
-            except Exception:
-                continue
+            except Exception as e:
+                if _is_quota_error(e): continue
+                break
     return ai_generate(prompt, max_tokens=2000)
 
 # ============================================================
@@ -703,7 +838,7 @@ def ai_deep(prompt: str) -> str:
 for key, val in {
     "strava_token_info":  {},
     "messages":           [],
-    "user_data":          {"peso": 75.0, "fc_min": 50, "fc_max": 190, "ftp": 200},
+    "user_data":          {"peso": 75.0, "fc_min": 50, "fc_max": 190, "ftp": 200, "eta": 33},
     "activities_cache":   [],
     "activities_last_ts": 0,
     "activities_token":   "",
@@ -713,6 +848,16 @@ for key, val in {
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
+
+# ── Carica profilo da GSheet (una volta per sessione) ──────────
+if _gsheet_ok and not st.session_state.get("_profile_loaded"):
+    _saved_profile = gsheet_load_profile()
+    if _saved_profile:
+        # Merge: mantieni defaults per chiavi mancanti
+        merged_profile = dict(st.session_state.user_data)
+        merged_profile.update(_saved_profile)
+        st.session_state.user_data = merged_profile
+    st.session_state["_profile_loaded"] = True
 
 # ============================================================
 # OAUTH
@@ -957,15 +1102,29 @@ if st.session_state.selected_act_id is not None:
         c6.metric("⚡ Watt",     m["watts"])
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Mappa
+        # Mappa 2D / 3D
+        import streamlit.components.v1 as _components
         poly = row.get("map", {})
         poly = poly.get("summary_polyline") if isinstance(poly, dict) else None
         if poly:
-            mobj = draw_map(poly, height=220)
-            if mobj:
-                st.markdown('<div style="margin:8px 12px 0">', unsafe_allow_html=True)
-                st_folium(mobj, width=None, height=220, key="det_map")
-                st.markdown('</div>', unsafe_allow_html=True)
+            if MAPBOX_TOKEN:
+                _t2d, _t3d = st.tabs(["🗺️ Mappa 2D", "🏔️ Mappa 3D"])
+                with _t2d:
+                    mobj = draw_map(poly, height=220)
+                    if mobj:
+                        st_folium(mobj, width=None, height=220, key="det_map_2d")
+                with _t3d:
+                    _eg   = float(row.get("total_elevation_gain") or 0)
+                    _h3d  = build_map3d_html(poly, MAPBOX_TOKEN,
+                                             sport_type=row.get("type",""), elev_gain=_eg, height=320)
+                    if _h3d:
+                        _components.html(_h3d, height=330, scrolling=False)
+            else:
+                mobj = draw_map(poly, height=220)
+                if mobj:
+                    st.markdown('<div style="margin:8px 12px 0">', unsafe_allow_html=True)
+                    st_folium(mobj, width=None, height=220, key="det_map")
+                    st.markdown('</div>', unsafe_allow_html=True)
 
         # Zone FC
         st.markdown("""<div class="mob-card">
@@ -990,6 +1149,91 @@ if st.session_state.selected_act_id is not None:
                 f"{_active}</div>",
                 unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── Zone Potenza (stile Garmin — barre orizzontali) ──
+        watts_avg = row.get("average_watts")
+        is_bike   = row["type"] in ("Ride","VirtualRide","MountainBikeRide")
+        ftp       = u.get("ftp", 200)
+        if is_bike and pd.notna(watts_avg) and watts_avg and watts_avg > 0 and ftp > 0:
+            is_estimated = not row.get("device_watts", False)
+            _pwr_zones_def = [
+                (1,"#9E9E9E","Z1 · Recupero Attivo",  0.00, 0.55, "Pedalata leggera, recupero"),
+                (2,"#4CAF50","Z2 · Resistenza",        0.55, 0.75, "Base aerobica, lunghe uscite"),
+                (3,"#8BC34A","Z3 · Tempo",             0.75, 0.90, "Sforzo sostenuto confortevole"),
+                (4,"#FFC107","Z4 · Soglia",            0.90, 1.05, "Soglia lattato, duro ma gestibile"),
+                (5,"#FF9800","Z5 · VO2max",            1.05, 1.20, "Sforzo intenso, breve durata"),
+                (6,"#FF5722","Z6 · Anaerobico",        1.20, 1.50, "Scatti brevi, oltre soglia"),
+                (7,"#F44336","Z7 · Neuromuscolare",    1.50, 9.99, "Sprint massimale, < 30 sec"),
+            ]
+            _wpct = watts_avg / ftp
+            # Stima distribuzione tempo: usa curva trapezoidale centrata sulla zona attiva
+            # (senza dati reali lap-by-lap, usiamo distribuzione approssimata dal avg watts)
+            _dur_sec = float(row.get("moving_time", 0))
+            def _zone_time_estimate(zlo, zhi, wpct, dur):
+                """Stima % tempo in zona basata su distanza da zona media."""
+                # La zona che contiene wpct prende ~60%, adiacenti ~20% e 10%
+                mid = (zlo + zhi) / 2 if zhi < 9 else zlo + 0.25
+                dist = abs(wpct - mid)
+                if wpct >= zlo and wpct < zhi: return 0.60
+                if dist < 0.15: return 0.18
+                if dist < 0.30: return 0.10
+                if dist < 0.45: return 0.05
+                return 0.02
+            _raw = [_zone_time_estimate(zlo, zhi, _wpct, _dur_sec)
+                    for (_, _, _, zlo, zhi, _) in _pwr_zones_def]
+            _tot = sum(_raw) or 1
+            _pcts  = [r/_tot for r in _raw]
+            _times = [p * _dur_sec for p in _pcts]
+
+            st.markdown('<div class="mob-card">', unsafe_allow_html=True)
+            if is_estimated:
+                st.markdown('<div class="mob-card-title">⚡ Zone Potenza ⚠️ <span style="font-weight:400;color:#FF9800;font-size:10px">watt stimati Strava</span></div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="mob-card-title">⚡ Zone Potenza · FTP {ftp} W</div>', unsafe_allow_html=True)
+
+            _watt_cur_zone_idx = next(
+                (i for i,(_, _,_,zlo,zhi,_) in enumerate(_pwr_zones_def) if zlo <= _wpct < zhi), 3)
+
+            zones_html = ''
+            for i, (zn, zc, zlabel, zlo, zhi, zdesc) in enumerate(_pwr_zones_def):
+                _wlo = int(ftp * zlo)
+                _whi = f"{int(ftp*zhi)}" if zhi < 9 else "∞"
+                _pct = _pcts[i]
+                _tsec = _times[i]
+                _tmin = int(_tsec // 60)
+                _tsec2 = int(_tsec % 60)
+                _tstr = f"{_tmin}:{_tsec2:02d}"
+                _is_cur = (i == _watt_cur_zone_idx)
+                _bar_w  = max(2, int(_pct * 100))
+                _bg     = f"{zc}18" if _is_cur else "transparent"
+                _brd    = f"border-left:3px solid {zc};" if _is_cur else "border-left:3px solid transparent;"
+                zones_html += f"""
+                <div style="padding:8px 4px;{_brd}background:{_bg};border-radius:0 8px 8px 0;margin:2px 0">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">
+                    <div>
+                      <span style="font-size:13px;font-weight:700;color:{zc}">{zlabel}</span>
+                      <span style="font-size:10px;color:#aaa;margin-left:6px">{_wlo}–{_whi} W</span>
+                    </div>
+                    <div style="display:flex;gap:12px;align-items:baseline">
+                      <span style="font-size:13px;font-weight:700;color:#333">{_tstr}</span>
+                      <span style="font-size:12px;color:#888;min-width:32px;text-align:right">{_pct*100:.0f}%</span>
+                    </div>
+                  </div>
+                  <div style="background:#f0f0f0;border-radius:4px;height:6px;overflow:hidden">
+                    <div style="background:{zc};width:{_bar_w}%;height:6px;border-radius:4px;
+                         transition:width 0.3s"></div>
+                  </div>
+                </div>"""
+            st.markdown(zones_html, unsafe_allow_html=True)
+
+            # Metriche potenza
+            _if_val = watts_avg / ftp
+            _tss_p  = (row["moving_time"] * watts_avg * _if_val) / (ftp * 3600) * 100
+            pw1, pw2, pw3 = st.columns(3)
+            pw1.metric("⚡ Watt medi",  f"{watts_avg:.0f} W")
+            pw2.metric("📊 IF",          f"{_if_val:.2f}")
+            pw3.metric("📈 TSS pot.",    f"{_tss_p:.0f}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
         # Analisi AI
         st.markdown("""<div class="mob-card">
@@ -1024,33 +1268,57 @@ if st.session_state.selected_act_id is not None:
 # ============================================================
 if st.session_state.mob_menu == "dashboard":
 
+    # ── Calcola delta 7gg fa ──
+    _7d_ago_idx = df[df["start_date"] <= df["start_date"].max() - pd.Timedelta(days=7)]
+    if not _7d_ago_idx.empty:
+        _ctl_7d = float(_7d_ago_idx["ctl"].iloc[-1])
+        _atl_7d = float(_7d_ago_idx["atl"].iloc[-1])
+        _tsb_7d = float(_7d_ago_idx["tsb"].iloc[-1])
+    else:
+        _ctl_7d = _atl_7d = _tsb_7d = None
+
+    def _delta_str(cur, old):
+        if old is None: return ""
+        d = cur - old
+        arrow = "↑" if d > 0.5 else "↓" if d < -0.5 else "→"
+        col = "#4CAF50" if d > 0.5 else "#F44336" if d < -0.5 else "#888"
+        return f"<span style='font-size:11px;color:{col}'>{arrow}{abs(d):.0f} vs 7gg fa</span>"
+
     # ── Metriche CTL / ATL / TSB ──
-    st.markdown("""<div class="mob-card">
-    <div class="mob-card-title">📈 Stato Forma</div>""", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        ctl_color = "#4CAF50" if current_ctl > 60 else "#FF9800" if current_ctl > 40 else "#F44336"
-        st.markdown(f"""<div class="big-metric">
-            <div class="val" style="color:{ctl_color}">{current_ctl:.0f}</div>
-            <div class="lbl">CTL Fitness</div>
-        </div>""", unsafe_allow_html=True)
-    with c2:
-        tsb_color = "#4CAF50" if current_tsb > 5 else "#FF9800" if current_tsb > -15 else "#F44336"
-        st.markdown(f"""<div class="big-metric">
-            <div class="val" style="color:{tsb_color}">{current_tsb:+.0f}</div>
-            <div class="lbl">TSB Forma</div>
-        </div>""", unsafe_allow_html=True)
-    with c3:
-        atl_color = "#FF9800" if current_atl > current_ctl else "#4CAF50"
-        st.markdown(f"""<div class="big-metric">
-            <div class="val" style="color:{atl_color}">{current_atl:.0f}</div>
-            <div class="lbl">ATL Fatica</div>
-        </div>""", unsafe_allow_html=True)
-    st.markdown(f"""<div style="text-align:center;margin-top:8px">
-        <span class="status-badge" style="background:{status_color}22;color:{status_color};
-              border:1px solid {status_color}44">{status_label}</span>
+    ctl_color = "#4CAF50" if current_ctl > 60 else "#FF9800" if current_ctl > 40 else "#F44336"
+    tsb_color = "#4CAF50" if current_tsb > 5 else "#FF9800" if current_tsb > -15 else "#F44336"
+    atl_color = "#FF9800" if current_atl > current_ctl * 1.1 else "#4CAF50"
+
+    st.markdown(f"""<div class="mob-card">
+    <div class="mob-card-title">📈 Stato Forma · <span style="font-weight:400">{status_label}</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:8px 0">
+
+      <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
+        <div style="font-size:32px;font-weight:900;color:{ctl_color};line-height:1">{current_ctl:.0f}</div>
+        <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">CTL · Fitness</div>
+        <div style="font-size:10px;color:#888;line-height:1.3">Forma cronica<br>42 giorni</div>
+        {_delta_str(current_ctl, _ctl_7d)}
+      </div>
+
+      <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
+        <div style="font-size:32px;font-weight:900;color:{tsb_color};line-height:1">{current_tsb:+.0f}</div>
+        <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">TSB · Forma</div>
+        <div style="font-size:10px;color:#888;line-height:1.3">&gt;5 fresco<br>&lt;-20 stanco</div>
+        {_delta_str(current_tsb, _tsb_7d)}
+      </div>
+
+      <div style="text-align:center;padding:10px 4px;background:#f8f9fa;border-radius:12px">
+        <div style="font-size:32px;font-weight:900;color:{atl_color};line-height:1">{current_atl:.0f}</div>
+        <div style="font-size:11px;font-weight:700;color:#333;margin:2px 0">ATL · Fatica</div>
+        <div style="font-size:10px;color:#888;line-height:1.3">Carico acuto<br>7 giorni</div>
+        {_delta_str(current_atl, _atl_7d)}
+      </div>
+    </div>
+    <div style="font-size:11px;color:#aaa;text-align:center;padding:4px 0">
+      TSS ultimi 7gg: <b style="color:#555">{df[df["start_date"] >= df["start_date"].max()-pd.Timedelta(days=7)]["tss"].sum():.0f}</b>
+      · attività: <b style="color:#555">{len(df[df["start_date"] >= df["start_date"].max()-pd.Timedelta(days=7)])}</b>
+    </div>
     </div>""", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Grafico fitness 30gg ──
     st.markdown('<div class="mob-card"><div class="mob-card-title">📊 Fitness ultimi 30 giorni</div>',
@@ -1083,15 +1351,20 @@ if st.session_state.mob_menu == "dashboard":
     s   = get_sport_info(last_act["type"], last_act.get("name",""))
     m   = format_metrics(last_act)
     z_n, z_c, z_l = get_zone_for_activity(last_act, u["fc_max"])
+    _act_id = last_act.get("id", last_act.name)
 
     st.markdown(f"""
     <div class="act-card" style="border-left-color:{s['color']}">
-        <div class="mob-card-title">🕐 Ultima Attività</div>
-        <div class="act-title">{s['icon']} {last_act['name']}</div>
-        <div class="act-meta">{last_act['start_date'].strftime('%d %b %Y · %H:%M')} ·
-            <span class="zone-chip" style="background:{z_c}22;color:{z_c}">{z_l}</span>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div class="mob-card-title">🕐 Ultima Attività</div>
+            <div class="act-title">{s['icon']} {last_act['name']}</div>
+            <div class="act-meta">{last_act['start_date'].strftime('%d %b %Y · %H:%M')} ·
+                <span class="zone-chip" style="background:{z_c}22;color:{z_c}">{z_l}</span>
+            </div>
+          </div>
         </div>
-        <div class="act-pills">
+        <div class="act-pills" style="margin-top:6px">
             <span class="act-pill">📏 <b>{m['dist_str']}</b></span>
             <span class="act-pill">⏱️ <b>{m['dur_str']}</b></span>
             <span class="act-pill">⚡ <b>{m['pace_str']}</b></span>
@@ -1101,6 +1374,11 @@ if st.session_state.mob_menu == "dashboard":
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Pulsante lente direttamente nella card
+    if st.button("🔍 Vedi dettaglio completo", key="dash_det_last", use_container_width=True):
+        st.session_state.selected_act_id = _act_id
+        st.rerun()
 
     # Mappa ultima attività
     poly = last_act.get("map", {})
@@ -1112,12 +1390,50 @@ if st.session_state.mob_menu == "dashboard":
             st_folium(mobj, width=None, height=200, key="dash_map")
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # Pulsante dettaglio
-    st.markdown('<div class="sec-pad" style="margin-top:8px">', unsafe_allow_html=True)
-    _act_id = last_act.get("id", last_act.name)
-    if st.button("🔍 Dettaglio completo", use_container_width=True, type="secondary"):
-        st.session_state.selected_act_id = _act_id
-        st.rerun()
+    # ── Commento AI automatico ultima attività ──
+    _last_ai_key = f"dash_ai_{str(_act_id)}"
+    if _last_ai_key not in st.session_state and _ai_sdk_mode is not None:
+        with st.spinner("🤖 Il coach commenta l'ultima uscita..."):
+            _ctx = (f"Sport: {s['label']}. Distanza: {m['dist_str']}. "
+                    f"Durata: {m['dur_str']}. Passo: {m['pace_str']}. "
+                    f"Dislivello: {m['elev']}. FC media: {m['hr_avg']}. "
+                    f"TSS: {last_act['tss']:.0f}. CTL: {current_ctl:.0f}, TSB: {current_tsb:.0f}.")
+            _ai_resp = ai_generate(
+                _ctx + "\n\nSei un coach d'élite. In 2 frasi brevi commenta questa sessione "
+                "e dai UN suggerimento pratico per la prossima. Sii diretto, niente preamboli.")
+            st.session_state[_last_ai_key] = _ai_resp
+            st.rerun()
+
+    if _last_ai_key in st.session_state:
+        _ai_txt = st.session_state[_last_ai_key]
+        if not _ai_txt.startswith("⚠️"):
+            st.markdown(f'<div class="ai-box" style="margin:8px 12px 0">{_ai_txt}</div>',
+                        unsafe_allow_html=True)
+
+    # ── Ultime 5 attività ──
+    st.markdown('<div class="mob-card" style="margin-top:8px">', unsafe_allow_html=True)
+    st.markdown('<div class="mob-card-title">🏅 Ultime 5 Attività</div>', unsafe_allow_html=True)
+    for _, _row5 in df.iloc[-5:][::-1].iterrows():
+        _s5  = get_sport_info(_row5["type"], _row5.get("name",""))
+        _m5  = format_metrics(_row5)
+        _id5 = _row5.get("id", _row5.name)
+        st.markdown(f"""
+        <div style="padding:8px 0;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:10px">
+          <div style="font-size:22px">{_s5['icon']}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:700;color:#1a1a1a;
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{_row5['name']}</div>
+            <div style="font-size:11px;color:#888">{_row5['start_date'].strftime('%d %b · %H:%M')}
+              · {_m5['dist_str']} · {_m5['dur_str']}</div>
+          </div>
+          <div style="font-size:12px;color:{_s5['color']};font-weight:700;white-space:nowrap">
+            {_row5['tss']:.0f} TSS
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🔍", key=f"dash5_{_id5}"):
+            st.session_state.selected_act_id = _id5
+            st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================
@@ -1514,15 +1830,22 @@ elif st.session_state.mob_menu == "profilo":
                 unsafe_allow_html=True)
 
     with st.form("profilo_form"):
-        peso  = st.number_input("Peso (kg)",    value=float(u["peso"]),   min_value=40.0, max_value=150.0, step=0.5)
-        fc_min = st.number_input("FC riposo",   value=int(u["fc_min"]),   min_value=30,   max_value=80)
-        fc_max = st.number_input("FC massima",  value=int(u["fc_max"]),   min_value=150,  max_value=230)
-        ftp    = st.number_input("FTP (Watt)",  value=int(u.get("ftp",200)), min_value=50, max_value=500)
+        peso  = st.number_input("Peso (kg)",    value=float(u["peso"]),      min_value=40.0, max_value=150.0, step=0.5)
+        eta   = st.number_input("Età (anni)",   value=int(u.get("eta",33)),  min_value=15,   max_value=80)
+        fc_min = st.number_input("FC riposo",   value=int(u["fc_min"]),      min_value=30,   max_value=80)
+        fc_max = st.number_input("FC massima",  value=int(u["fc_max"]),      min_value=150,  max_value=230)
+        ftp    = st.number_input("FTP (Watt)",  value=int(u.get("ftp",200)), min_value=50,   max_value=500)
         if st.form_submit_button("💾 Salva", use_container_width=True, type="primary"):
-            st.session_state.user_data = {
-                "peso": peso, "fc_min": fc_min, "fc_max": fc_max, "ftp": ftp
+            _new_profile = {
+                "peso": peso, "fc_min": fc_min, "fc_max": fc_max,
+                "ftp": ftp, "eta": eta
             }
-            st.success("✅ Profilo aggiornato!")
+            st.session_state.user_data = _new_profile
+            if _gsheet_ok:
+                gsheet_save_profile(_new_profile)
+                st.success("✅ Profilo aggiornato e salvato!")
+            else:
+                st.success("✅ Profilo aggiornato (solo sessione corrente)!")
             st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1552,90 +1875,29 @@ elif st.session_state.mob_menu == "profilo":
     </div>
     </div>""", unsafe_allow_html=True)
 
-    # ── Pannello Google Sheets con debug completo ──
-    st.markdown('<div class="mob-card"><div class="mob-card-title">💾 Google Sheets Cache</div>',
-                unsafe_allow_html=True)
-
-    # Step 1: Secrets presenti?
-    gs_id_ok   = bool(GSHEET_ID)
-    gs_cred_ok = bool(GSHEET_CREDS)
-    st.markdown(f"**Step 1 — Secrets**", unsafe_allow_html=False)
-    st.markdown(
-        f"{'✅' if gs_id_ok else '❌'} `GSHEET_ID`: "
-        f"{GSHEET_ID[:12]+'...' if gs_id_ok else 'MANCANTE'}"
-    )
-    st.markdown(
-        f"{'✅' if gs_cred_ok else '❌'} `GSHEET_CREDENTIALS`: "
-        f"{'presente (' + str(len(GSHEET_CREDS)) + ' chars)' if gs_cred_ok else 'MANCANTE'}"
-    )
-
-    if gs_id_ok and gs_cred_ok:
-        # Step 2: Connessione
-        st.markdown("**Step 2 — Connessione**")
-        with st.spinner("Test connessione GSheet..."):
-            _, _test_sheet = _get_gsheet_client()
-        _gs_err = st.session_state.get("_gsheet_err")
-        _gs_email = st.session_state.get("_gsheet_email","?")
-        if _test_sheet is not None:
-            st.success(f"✅ Connesso! Account: `{_gs_email}`")
-            # Step 3: Dati nel sheet
-            st.markdown("**Step 3 — Dati nel sheet**")
-            last_sync = gsheet_get_last_sync()
-            if last_sync:
-                st.success(f"✅ Ultimo sync: **{last_sync.strftime('%d/%m/%Y %H:%M')}**")
-            else:
-                st.warning("⚠️ Nessun sync registrato — il sheet potrebbe essere vuoto")
-            # Conta righe
-            try:
-                _acts_ws  = _test_sheet.worksheet("activities")
-                _n_rows   = len(_acts_ws.col_values(1)) - 1  # escludi header
-                if _n_rows > 0:
-                    st.success(f"✅ **{_n_rows}** attività salvate nel sheet")
-                else:
-                    st.error("❌ Sheet 'activities' vuoto — il salvataggio non è avvenuto")
-            except Exception as _we:
-                st.error(f"❌ Tab 'activities' non trovato: {_we}")
-
-            # Step 4: stato ultimo salvataggio
-            st.markdown("**Step 4 — Ultimo salvataggio**")
-            _save_ok  = st.session_state.get("_gsheet_save_ok")
-            _save_rows = st.session_state.get("_gsheet_save_rows", 0)
-            _save_err  = st.session_state.get("_gsheet_save_err","")
-            if _save_ok is True:
-                st.success(f"✅ Ultimo salvataggio OK: {_save_rows} righe scritte")
-            elif _save_ok is False:
-                st.error(f"❌ Ultimo salvataggio FALLITO: {_save_err}")
-            else:
-                st.info("ℹ️ Nessun salvataggio tentato in questa sessione")
-
-            # Pulsanti azione
-            st.markdown("**Azioni**")
-            if st.button("🔄 Forza sync completo da Strava", use_container_width=True, type="primary"):
-                with st.spinner("Scarico tutto da Strava..."):
-                    raw_new = load_all_from_strava(access_token)
+    # ── Google Sheets status semplice ──
+    if _gsheet_ok:
+        st.markdown('<div class="mob-card"><div class="mob-card-title">💾 Cache Google Sheets</div>',
+                    unsafe_allow_html=True)
+        last_sync = gsheet_get_last_sync()
+        sync_str  = last_sync.strftime("%d/%m/%Y %H:%M") if last_sync else "Mai sincronizzato"
+        n_cached  = len(st.session_state.get("activities_cache", []))
+        st.markdown(f"""
+        <div style="font-size:13px;color:#555">
+            🕐 Ultimo sync: <b>{sync_str}</b><br>
+            📦 Attività in cache: <b>{n_cached}</b><br>
+            <span style="font-size:11px;color:#888">Aggiornamento auto ogni 24h</span>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🔄 Forza sync da Strava", use_container_width=True):
+            with st.spinner("Sincronizzazione in corso..."):
+                raw_new = load_all_from_strava(access_token)
                 if raw_new:
-                    with st.spinner(f"Salvo {len(raw_new)} attività nel sheet..."):
-                        _ok = gsheet_save_activities(raw_new)
-                    if _ok:
-                        st.session_state.activities_cache = raw_new
-                        st.success(f"✅ {len(raw_new)} attività sincronizzate e salvate!")
-                    else:
-                        _err = st.session_state.get("_gsheet_save_err","errore sconosciuto")
-                        st.error(f"❌ Salvataggio fallito: {_err}")
-                else:
-                    st.error("❌ Nessuna attività ricevuta da Strava")
-                st.rerun()
-        else:
-            st.error(_gs_err or "❌ Connessione fallita — errore sconosciuto")
-            st.markdown("""
-**Possibili cause:**
-- Il Service Account non ha accesso al Sheet (controlla condivisione)
-- `GSHEET_ID` errato (deve essere l'ID dalla URL, non il nome del file)
-- `GSHEET_CREDENTIALS` malformato (deve essere il JSON completo con triple apici `'''`)
-- Librerie mancanti nel requirements.txt (`gspread`, `google-auth`)
-            """)
-
-    st.markdown("</div>", unsafe_allow_html=True)
+                    st.session_state.activities_cache = raw_new
+                    gsheet_save_activities(raw_new)
+                    st.success(f"✅ {len(raw_new)} attività salvate!")
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # Logout
     st.markdown('<div class="sec-pad" style="margin-top:12px">', unsafe_allow_html=True)
