@@ -201,7 +201,28 @@ st.markdown("""
       box-shadow: 0 2px 8px rgba(0,0,0,0.06);
       border-left: 4px solid #ccc;
   }
-  .act-title {
+
+  /* Bottone dettaglio cucito sotto la card */
+  .act-card + div[data-testid="stButton"] {
+      margin: 0 12px 0 !important;
+      padding: 0 !important;
+  }
+  .act-card + div[data-testid="stButton"] > button {
+      border-radius: 0 0 14px 14px !important;
+      border-top: 1px solid #f0f0f0 !important;
+      background: #fafafa !important;
+      color: #1565C0 !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      min-height: 40px !important;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06) !important;
+      border-left: none !important;
+      border-right: none !important;
+      border-bottom: none !important;
+  }
+  .act-card + div[data-testid="stButton"] > button:hover {
+      background: #E3F2FD !important;
+  }  .act-title {
       font-size: 15px;
       font-weight: 700;
       color: #1a1a1a;
@@ -2001,10 +2022,9 @@ if st.session_state.mob_menu == "dashboard":
         _zn5, _zc5, _zl5 = get_zone_for_activity(_row5, u["fc_max"])
         _is_first = (_i5 == 0)
 
-        # Pre-calcola tutte le variabili
-        _title_html   = '<div class="mob-card-title">&#128336; Ultima Attivit&agrave;</div>' if _is_first else ""
+        _title_html   = '<div class="mob-card-title">⏱ Ultima Attività</div>' if _is_first else ""
         _name5        = str(_row5["name"])
-        _date5        = _row5["start_date"].strftime("%d %b %Y &middot; %H:%M")
+        _date5        = _row5["start_date"].strftime("%d %b %Y · %H:%M")
         _icon5        = _s5["icon"]
         _color5       = _s5["color"]
         _dist5        = _m5["dist_str"]
@@ -2014,25 +2034,29 @@ if st.session_state.mob_menu == "dashboard":
         _hr5          = _m5["hr_avg"]
         _tss5         = f"{_row5['tss']:.0f}"
 
+        # Card con border-radius solo in alto — il bottone chiude in basso
         st.markdown(
-            f'<div class="act-card" style="border-left-color:{_color5}">' +
+            f'<div class="act-card" style="border-left-color:{_color5};'
+            f'border-radius:14px 14px 0 0;margin-bottom:0">' +
             _title_html +
-            f'<div class="act-title">{_icon5} {_name5}</div>' +
-            f'<div class="act-meta">{_date5} &middot; <span class="zone-chip" style="background:{_zc5}22;color:{_zc5}">{_zl5}</span></div>' +
-            f'<div class="act-pills" style="margin-top:6px">' +
-            f'<span class="act-pill">&#128207; <b>{_dist5}</b></span>' +
-            f'<span class="act-pill">&#9201;&#65039; <b>{_dur5}</b></span>' +
-            f'<span class="act-pill">&#9889; Vel. <b>{_pace5}</b></span>' +
-            f'<span class="act-pill">&#9968;&#65039; <b>{_elev5}</b></span>' +
-            f'<span class="act-pill">&#10084;&#65039; <b>{_hr5} bpm</b></span>' +
-            f'<span class="act-pill">TSS <b>{_tss5}</b></span>' +
-            '</div></div>',
-            unsafe_allow_html=True
-        )
+            f'<div class="act-title">{_icon5} {_name5}</div>'
+            f'<div class="act-meta">{_date5} · '
+            f'<span class="zone-chip" style="background:{_zc5}22;color:{_zc5}">{_zl5}</span></div>'
+            f'<div class="act-pills" style="margin-top:6px">'
+            f'<span class="act-pill">📏 <b>{_dist5}</b></span>'
+            f'<span class="act-pill">⏱ <b>{_dur5}</b></span>'
+            f'<span class="act-pill">⚡ <b>{_pace5}</b></span>'
+            f'<span class="act-pill">⛰ <b>{_elev5}</b></span>'
+            f'<span class="act-pill">❤️ <b>{_hr5} bpm</b></span>'
+            f'<span class="act-pill">TSS <b>{_tss5}</b></span>'
+            f'</div></div>',
+            unsafe_allow_html=True)
 
-        if st.button("&#128269; Dettaglio", key=f"dash5_{_id5}", use_container_width=True):
+        # Bottone "Apri dettaglio" — visivamente cucito sotto la card
+        if st.button("Apri dettaglio →", key=f"dash5_{_id5}", use_container_width=True):
             st.session_state.selected_act_id = _id5
             st.rerun()
+        st.markdown('<div style="margin-bottom:4px"></div>', unsafe_allow_html=True)
 
         # Solo prima attività: mappa + AI
         if _is_first:
@@ -2396,32 +2420,47 @@ elif st.session_state.mob_menu == "storico":
             row_html += '</div>'
             st.markdown(row_html, unsafe_allow_html=True)
 
-        # Lista attività del mese selezionato
+        # Lista attività del mese selezionato — schede ricche cliccabili
         if not month_acts.empty:
-            st.markdown(f'<div class="mob-card" style="margin-top:8px">'
-                        f'<div class="mob-card-title">{len(month_acts)} attività questo mese · '
-                        f'TSS totale: {month_acts["tss"].sum():.0f}</div>',
-                        unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="sec-pad" style="margin-top:8px">'
+                f'<div style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;'
+                f'letter-spacing:0.5px;margin-bottom:6px">'
+                f'{len(month_acts)} attività · TSS {month_acts["tss"].sum():.0f} · '
+                f'{month_acts["distance"].sum()/1000:.0f} km</div></div>',
+                unsafe_allow_html=True)
             for _, row in month_acts.iloc[::-1].iterrows():
-                s_  = get_sport_info(row["type"], row.get("name",""))
-                m_  = format_metrics(row)
-                _id = row.get("id", row.name)
-                st.markdown(f"""
-                <div style="padding:6px 0;border-bottom:1px solid #f0f0f0;display:flex;
-                            align-items:center;gap:8px">
-                    <div style="font-size:20px">{s_['icon']}</div>
-                    <div style="flex:1">
-                        <div style="font-size:13px;font-weight:700;color:#1a1a1a">{row['name']}</div>
-                        <div style="font-size:11px;color:#888">{row['start_date'].strftime('%d %b · %H:%M')}
-                            · {m_['dist_str']} · {m_['dur_str']}</div>
-                    </div>
-                    <div style="font-size:12px;color:#888;font-weight:600">{row['tss']:.0f} TSS</div>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("→", key=f"cal_det_{_id}"):
+                s_   = get_sport_info(row["type"], row.get("name",""))
+                m_   = format_metrics(row)
+                _id  = row.get("id", row.name)
+                _zn, _zc, _zl = get_zone_for_activity(row, u["fc_max"])
+                _hr  = m_["hr_avg"]
+                _tss = f"{row['tss']:.0f}"
+                _watts_str = f" · ⚡ {m_['watts']}" if m_["watts"] != "—" else ""
+
+                st.markdown(
+                    f'<div class="act-card" style="border-left-color:{s_["color"]};margin-bottom:0;border-radius:14px 14px 0 0">'
+                    f'<div class="act-title">{s_["icon"]} {str(row["name"])}</div>'
+                    f'<div class="act-meta">'
+                    f'{row["start_date"].strftime("%d %b · %H:%M")} &middot; '
+                    f'<span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>'
+                    f'</div>'
+                    f'<div class="act-pills" style="margin-top:6px">'
+                    f'<span class="act-pill">📏 <b>{m_["dist_str"]}</b></span>'
+                    f'<span class="act-pill">⏱ <b>{m_["dur_str"]}</b></span>'
+                    f'<span class="act-pill">⚡ <b>{m_["pace_str"]}</b></span>'
+                    f'<span class="act-pill">⛰ <b>{m_["elev"]}</b></span>'
+                    f'<span class="act-pill">❤️ <b>{_hr} bpm</b></span>'
+                    f'<span class="act-pill">TSS <b>{_tss}</b></span>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True)
+                # Bottone che sembra la parte inferiore della card
+                if st.button("Dettaglio →", key=f"cal_det_{_id}", use_container_width=True):
                     st.session_state.selected_act_id = _id
                     st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+                # Spacer
+                st.markdown('<div style="margin-bottom:8px"></div>', unsafe_allow_html=True)
 
 # ============================================================
 # ── MENU: COACH CHAT ─────────────────────────────────────────
