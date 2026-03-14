@@ -158,33 +158,6 @@ st.markdown("""
       margin: 2px 0 0;
   }
 
-  /* Bottom Navigation Bar — layer decorativo */
-  .bottom-nav-decor {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      background: #ffffff;
-      border-top: 1px solid #e0e0e0;
-      display: flex;
-      justify-content: space-around;
-      align-items: center;
-      padding: 6px 0 10px;
-      z-index: 999;
-      box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
-      pointer-events: none;
-  }
-  .nav-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      padding: 4px 12px;
-      border-radius: 12px;
-  }
-  .nav-item.active { background: #E3F2FD; }
-  .nav-icon { font-size: 22px; line-height: 1; }
-  .nav-label { font-size: 10px; font-weight: 600; color: #555; }
-  .nav-item.active .nav-label { color: #1565C0; }
-
   /* Card generica */
   .mob-card {
       background: #ffffff;
@@ -877,6 +850,7 @@ def draw_map(encoded_polyline, height=220):
 # ============================================================
 # Modelli flash in ordine di preferenza (più recente → più vecchio)
 _FLASH_MODELS = [
+    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash-preview-04-17",
     "gemini-2.5-flash-preview-05-20",
     "gemini-2.5-flash-preview",
@@ -887,6 +861,7 @@ _FLASH_MODELS = [
     "gemini-1.5-flash-latest",
 ]
 _PRO_MODELS = [
+    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-pro-preview-05-06",
     "gemini-2.5-pro-preview-03-25",
     "gemini-2.5-flash-preview-04-17",
@@ -909,6 +884,7 @@ def _discover_available_models() -> dict:
             discovered = []
         # Unisci con statica
         static = [
+            "gemini-3.1-flash-lite-preview",
             "gemini-2.5-flash-preview-04-17",
             "gemini-2.5-flash-preview-05-20",
             "gemini-2.5-pro-preview-05-06",
@@ -922,8 +898,8 @@ def _discover_available_models() -> dict:
             "gemini-1.5-flash-8b",
         ]
         all_models = list(dict.fromkeys(static + discovered))  # dedup, mantieni ordine
-        icons = {"2.5-pro": "🧠", "2.5-flash": "⚡", "2.0-flash-lite": "🚀",
-                 "2.0-flash": "⚡", "1.5-pro": "📚", "1.5-flash": "💨"}
+        icons = {"3.1-flash": "🚀", "2.5-pro": "🧠", "2.5-flash": "⚡",
+                 "2.0-flash-lite": "💨", "2.0-flash": "⚡", "1.5-pro": "📚", "1.5-flash": "💨"}
         for m in all_models:
             icon = next((v for k,v in icons.items() if k in m), "🔷")
             found[m] = f"{icon} {m}"
@@ -1171,7 +1147,7 @@ def build_chat_context(df, u, current_ctl, current_atl, current_tsb,
 def build_daily_briefing(df, u, current_ctl, current_atl, current_tsb,
                          status_label, vo2max_val) -> str:
     """
-    Genera il briefing giornaliero del coach — ricco e contestualizzato.
+    Genera il briefing giornaliero — stato forma, commento ultime 3 attività, prossimi giorni.
     """
     ftp  = u.get("ftp", 200)
     now  = df["start_date"].max()
@@ -1190,59 +1166,90 @@ def build_daily_briefing(df, u, current_ctl, current_atl, current_tsb,
         _ctl_start = float(_spark14["ctl"].iloc[0])
         _ctl_end   = float(_spark14["ctl"].iloc[-1])
         _delta = _ctl_end - _ctl_start
-        if _delta > 3:   ctl_trend = "in crescita (+" + str(round(_delta)) + ")"
-        elif _delta < -3: ctl_trend = "in calo (" + str(round(_delta)) + ")"
+        if _delta > 3:    ctl_trend = "in crescita (+" + str(round(_delta)) + " pts)"
+        elif _delta < -3: ctl_trend = "in calo (" + str(round(_delta)) + " pts)"
+
+    # TSB trend
+    tsb_trend = "neutro"
+    if current_tsb > 10:   tsb_trend = "fresco, pronto per caricare"
+    elif current_tsb > 0:  tsb_trend = "leggermente fresco"
+    elif current_tsb > -10: tsb_trend = "lieve accumulo fatica"
+    elif current_tsb > -20: tsb_trend = "affaticato, gestire i carichi"
+    else:                   tsb_trend = "sovraccarico, recupero necessario"
 
     # Sport mix ultimi 28gg
-    sport_mix = df28["type"].value_counts().head(3)
+    sport_mix = df28["type"].value_counts().head(4)
     sport_str = " | ".join([str(k) + "=" + str(v) for k,v in sport_mix.items()])
 
-    # Ultime 3 sessioni
+    # Ultime 3 sessioni — dettaglio ricco
     last3_lines = []
     for _, r3 in df.iloc[-3:].iterrows():
         s3 = get_sport_info(r3["type"])
         m3 = format_metrics(r3)
+        wl3 = ""
+        if pd.notna(r3.get("average_watts")) and r3.get("average_watts", 0) > 0 and ftp > 0:
+            IF3 = r3["average_watts"] / ftp
+            wl3 = f" W={r3['average_watts']:.0f}(IF={IF3:.2f})"
+        hr3 = f" FC={r3['average_heartrate']:.0f}bpm" if pd.notna(r3.get("average_heartrate")) else ""
+        elev3 = f" D+{m3['elev']}" if float(r3.get("total_elevation_gain", 0) or 0) > 20 else ""
         last3_lines.append(
-            "  " + r3["start_date"].strftime("%d/%m") + " " + s3["icon"] +
-            " " + m3["dist_str"] + " " + m3["dur_str"] +
-            " TSS=" + str(round(r3["tss"])) +
-            " FC=" + m3["hr_avg"]
+            "  " + r3["start_date"].strftime("%d/%m %a") +
+            " " + s3["icon"] + " " + s3["label"] +
+            " — " + m3["dist_str"] + " " + m3["dur_str"] +
+            elev3 + hr3 + wl3 +
+            " · TSS=" + str(round(r3["tss"])) +
+            " · CTL=" + str(round(float(r3.get("ctl", current_ctl)))) +
+            " TSB=" + str(round(float(r3.get("tsb", current_tsb)), 1))
         )
+
+    # Prossimi giorni — analisi carico
+    _ramp = (current_ctl - float(_spark14["ctl"].iloc[0])) / 14 if len(_spark14) >= 2 else 0
+    ramp_str = f"{_ramp:+.1f} CTL/gg (14gg)"
 
     lines_b = [
         "Sei un coach sportivo d'elite specializzato in ciclismo, trail running e sci alpinismo.",
-        "Rispondi in italiano. Diretto e asciutto. Usa i numeri.",
+        "Rispondi in italiano. Tono diretto, concreto, professionale. Usa i numeri.",
         "",
-        "=== ATLETA ===",
+        "=== PROFILO ATLETA ===",
         str(u.get("eta",33)) + " anni | " + str(u.get("peso",75)) + "kg | "
             "FTP=" + str(ftp) + "W | FCmax=" + str(u["fc_max"]) + "bpm | "
-            "VO2max=" + str(vo2max_val or "N/D") + " ml/kg/min",
+            "FCmin=" + str(u["fc_min"]) + "bpm | VO2max=" + str(vo2max_val or "N/D") + " ml/kg/min",
         "",
-        "=== FORMA ATTUALE ===",
+        "=== STATO FORMA ATTUALE ===",
         "CTL=" + str(round(current_ctl)) + " (" + ctl_trend + ") | "
             "ATL=" + str(round(current_atl)) + " | "
-            "TSB=" + str(round(current_tsb,1)) + " | " + status_label,
-        "Ultima uscita: " + str(days_since_last) + "gg fa — "
-            + s_last["label"] + " " + m_last["dist_str"] + " TSS=" + str(round(last["tss"])),
+            "TSB=" + str(round(current_tsb, 1)) + " → " + tsb_trend,
+        "Ramp rate: " + ramp_str,
+        "Ultima uscita: " + str(days_since_last) + " giorni fa (" + s_last["label"] + " "
+            + m_last["dist_str"] + " TSS=" + str(round(last["tss"])) + ")",
         "",
         "=== CARICO RECENTE ===",
-        "7gg:  " + str(len(df7)) + " sess | TSS=" + str(round(df7["tss"].sum()))
-            + " | km=" + str(round(df7["distance"].sum()/1000)),
-        "14gg: " + str(len(df14)) + " sess | TSS=" + str(round(df14["tss"].sum())),
-        "28gg: " + str(len(df28)) + " sess | TSS=" + str(round(df28["tss"].sum()))
+        "7gg:  " + str(len(df7)) + " sessioni | TSS=" + str(round(df7["tss"].sum()))
+            + " | km=" + str(round(df7["distance"].sum()/1000))
+            + " | D+=" + str(round(df7["total_elevation_gain"].sum())) + "m",
+        "14gg: " + str(len(df14)) + " sessioni | TSS=" + str(round(df14["tss"].sum()))
+            + " | km=" + str(round(df14["distance"].sum()/1000)),
+        "28gg: " + str(len(df28)) + " sessioni | TSS=" + str(round(df28["tss"].sum()))
             + " | km=" + str(round(df28["distance"].sum()/1000)),
-        "Sport mix 28gg: " + sport_str,
+        "Mix sport 28gg: " + sport_str,
         "",
-        "=== ULTIME 3 SESSIONI ===",
+        "=== ULTIME 3 SESSIONI (dettaglio) ===",
     ] + last3_lines + [
         "",
-        "=== RICHIESTA ===",
-        "Scrivi un briefing giornaliero in 4-5 frasi:",
-        "1) Stato forma attuale con interpretazione dei numeri CTL/ATL/TSB",
-        "2) Analisi della settimana appena passata (qualita e quantita del carico)",
-        "3) Cosa fare OGGI: tipo di sessione, durata, zona, TSS target",
-        "4) Una nota su cosa tenere d'occhio nei prossimi giorni",
-        "Sii specifico con i numeri. Niente frasi di incoraggiamento generiche.",
+        "=== COMPITO ===",
+        "Scrivi un briefing in 3 sezioni ben distinte (usa \\n tra sezioni, NO markdown con *):",
+        "",
+        "1. STATO FORMA (2-3 frasi): interpreta i numeri CTL/ATL/TSB con il ramp rate."
+        " Spiega cosa significano per questo atleta in questo momento.",
+        "",
+        "2. ULTIME 3 SESSIONI (3-4 frasi): commenta qualitativamente ogni sessione."
+        " Come sono state rispetto al profilo? Zone corrette? Carico adeguato?",
+        "",
+        "3. PROSSIMI 3-5 GIORNI (3-4 frasi): cosa dovrebbe fare, in quale ordine."
+        " Tipo di sessione, durata indicativa, zona FC/potenza target, TSS target."
+        " Se serve recupero, dillo chiaramente e spiega perché.",
+        "",
+        "Sii specifico con i numeri. Niente frasi generiche. Max 200 parole totali.",
     ]
     ctx = "\n".join(lines_b)
     return ai_deep(ctx)
@@ -1263,7 +1270,7 @@ for key, val in {
     "mob_menu":           "dashboard",
     "selected_act_id":    None,
     "gsheet_loaded":      False,
-    "ai_model_pref":      "gemini-2.5-flash-preview-04-17",
+    "ai_model_pref":      "gemini-3.1-flash-lite-preview",
     "conv_loaded":        False,
     "weekly_plan":        None,
     "weekly_plan_date":   None,
@@ -1296,75 +1303,67 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Bottom nav affidabile: pulsanti Streamlit reali con CSS migliorato."""
+    """
+    Bottom nav SEMPRE visibile — fixed in basso via componente HTML iframe con postMessage.
+    I click inviano un messaggio al parent Streamlit che aggiorna il menu via query param.
+    Come fallback, mostra anche una riga di bottoni Streamlit nativi sopra la nav decorativa.
+    """
+    import streamlit.components.v1 as _st_comp
     cur = st.session_state.mob_menu
 
-    # HTML decorativo fisso (solo visivo)
-    items_html = ""
-    for key, icon, label in NAV_ITEMS:
-        active_cls = "active" if cur == key else ""
-        items_html += (
-            f'<div class="nav-item {active_cls}">'
-            f'<span class="nav-icon">{icon}</span>'
-            f'<span class="nav-label">{label}</span>'
-            f'</div>'
-        )
-    st.markdown(f'<div class="bottom-nav-decor">{items_html}</div>', unsafe_allow_html=True)
+    # ── Bottoni Streamlit nativi (funzionali, visivamente nascosti sotto la nav) ──
+    # Questi sono sempre presenti nel DOM e rispondono ai click
+    _btn_cols = st.columns(5)
+    for i, (key, icon, label) in enumerate(NAV_ITEMS):
+        with _btn_cols[i]:
+            _active_style = "primary" if cur == key else "secondary"
+            if st.button(f"{icon}\n{label}", key=f"nav_btn_{key}",
+                         use_container_width=True, type=_active_style):
+                st.session_state.mob_menu = key
+                st.session_state.selected_act_id = None
+                st.rerun()
 
-    # Container pulsanti reali — posizionato sulla nav bar tramite CSS raffinato
+    # ── CSS per posizionare la riga di bottoni come nav bar fissa ──
     st.markdown("""
     <style>
-    div[data-testid="stHorizontalBlock"].nav-real-buttons {
+    /* Seleziona l'ULTIMO stHorizontalBlock della pagina = la nav bar */
+    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"]:last-of-type {
         position: fixed !important;
         bottom: 0 !important;
         left: 0 !important;
         right: 0 !important;
-        z-index: 1002 !important;
-        background: transparent !important;
-        padding: 0 !important;
+        z-index: 1000 !important;
+        background: #ffffff !important;
+        border-top: 1px solid #e0e0e0 !important;
+        box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
+        padding: 6px 4px 10px !important;
         margin: 0 !important;
-        height: 64px !important;
         gap: 0 !important;
     }
-    div[data-testid="stHorizontalBlock"].nav-real-buttons > div {
-        padding: 0 !important;
-        flex: 1 !important;
+    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"]:last-of-type > div {
+        padding: 0 2px !important;
     }
-    div[data-testid="stHorizontalBlock"].nav-real-buttons button {
-        opacity: 0 !important;
-        height: 64px !important;
-        min-height: 64px !important;
-        width: 100% !important;
+    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"]:last-of-type button {
+        min-height: 52px !important;
+        height: 52px !important;
+        border-radius: 10px !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
         border: none !important;
-        background: transparent !important;
-        cursor: pointer !important;
+        white-space: pre-line !important;
+        line-height: 1.2 !important;
+        padding: 4px 2px !important;
+    }
+    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"]:last-of-type button[kind="secondary"] {
+        background: #ffffff !important;
+        color: #555 !important;
+    }
+    [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"]:last-of-type button[kind="primary"] {
+        background: #E3F2FD !important;
+        color: #1565C0 !important;
     }
     </style>
-    <script>
-    (function() {
-        // Aggiunge classe al prossimo stHorizontalBlock inserito nel DOM
-        const observer = new MutationObserver(() => {
-            const blocks = document.querySelectorAll('[data-testid="stHorizontalBlock"]:not(.nav-real-buttons)');
-            blocks.forEach(b => {
-                const btns = b.querySelectorAll('button');
-                if (btns.length === 5) {
-                    b.classList.add('nav-real-buttons');
-                }
-            });
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-    })();
-    </script>
     """, unsafe_allow_html=True)
-
-    cols = st.columns(5)
-    for i, (key, icon, label) in enumerate(NAV_ITEMS):
-        with cols[i]:
-            if st.button(label, key=f"nav_btn_{key}", use_container_width=True,
-                         type="secondary"):
-                st.session_state.mob_menu = key
-                st.session_state.selected_act_id = None
-                st.rerun()
 
 # ============================================================
 # LOGIN PAGE
@@ -1615,41 +1614,37 @@ if st.session_state.selected_act_id is not None:
 
         # Primo tentativo: polyline dalle cache (GSheet)
         poly = _get_polyline(row)
-        
-        # Se non trovata, offri fetch on-demand da Strava
-        if not poly:
-            st.markdown('<div class="mob-card"><div class="mob-card-title">🗺️ Traccia GPS</div>',
-                        unsafe_allow_html=True)
 
-            # Controlla se abbiamo già fetchato e salvato in session_state
-            _poly_key = f"poly_cache_{_sid}"
-            if _poly_key in st.session_state:
-                poly = st.session_state[_poly_key]
-            else:
-                st.info("Traccia GPS non in cache. Clicca il pulsante per caricarla da Strava.")
-                
-                if st.button("📥 Carica traccia da Strava", use_container_width=True, key=f"fetch_gpx_{_sid}"):
-                    with st.spinner("⏳ Caricamento traccia GPS da Strava..."):
-                        detailed_data = fetch_activity_details_from_strava(_sid, access_token)
-                        
-                        if detailed_data and detailed_data.get("map"):
-                            _fetched_poly = detailed_data["map"].get("summary_polyline")
-                            
-                            if _fetched_poly:
-                                # Salva in session_state PRIMA del rerun
-                                st.session_state[_poly_key] = _fetched_poly
-                                poly = _fetched_poly
-                                st.success("✅ Traccia caricata!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Traccia non disponibile per questa attività su Strava.")
+        # Secondo tentativo: session_state cache (fetch precedente)
+        _poly_key = f"poly_cache_{_sid}"
+        if not poly and _poly_key in st.session_state:
+            poly = st.session_state[_poly_key]
+
+        # Terzo tentativo: auto-fetch da Strava alla prima apertura
+        if not poly:
+            _auto_fetch_key = f"poly_tried_{_sid}"
+            if _auto_fetch_key not in st.session_state:
+                st.session_state[_auto_fetch_key] = True
+                with st.spinner("🗺️ Carico traccia GPS da Strava..."):
+                    _det = fetch_activity_details_from_strava(_sid, access_token)
+                    if _det and _det.get("map"):
+                        _fp = _det["map"].get("summary_polyline")
+                        if _fp:
+                            st.session_state[_poly_key] = _fp
+                            poly = _fp
                         else:
-                            st.error("❌ Errore nel caricamento da Strava.")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-        
+                            st.session_state[_poly_key] = "__no_poly__"
+                    else:
+                        st.session_state[_poly_key] = "__no_poly__"
+                if poly:
+                    st.rerun()
+            else:
+                # Fetch già tentato, nessuna traccia disponibile
+                if st.session_state.get(_poly_key) != "__no_poly__":
+                    poly = st.session_state.get(_poly_key)
+
         # Mostra mappa se polyline disponibile
-        if poly:
+        if poly and poly != "__no_poly__":
             st.markdown('<div class="mob-card"><div class="mob-card-title">🗺️ Traccia GPS</div>',
                         unsafe_allow_html=True)
             
@@ -1677,6 +1672,12 @@ if st.session_state.selected_act_id is not None:
                     st.error("❌ Errore nel rendering della mappa.")
             
             st.markdown("</div>", unsafe_allow_html=True)
+        elif st.session_state.get(_poly_key) == "__no_poly__":
+            st.markdown('<div class="mob-card">'
+                        '<div class="mob-card-title">🗺️ Traccia GPS</div>'
+                        '<div style="font-size:13px;color:#999;padding:4px 0">'
+                        '⚠️ Traccia GPS non disponibile per questa attività.</div>'
+                        '</div>', unsafe_allow_html=True)
 
         # Zone FC — stile Garmin con barre orizzontali
         hr_avg = row.get("average_heartrate")
@@ -1948,20 +1949,45 @@ if st.session_state.mob_menu == "dashboard":
     if _ai_sdk_mode is not None:
         _bkey = get_daily_briefing_key()
         if _bkey not in st.session_state:
-            with st.spinner("&#129302; Briefing coach..."):
+            with st.spinner("🤖 Briefing coach in preparazione..."):
                 _brief = build_daily_briefing(
                     df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val)
                 st.session_state[_bkey] = _brief
                 st.rerun()
         if _bkey in st.session_state:
             _bt = st.session_state[_bkey]
-            if not _bt.startswith("⚠️"):
+            if not str(_bt).startswith("⚠️"):
+                # Formatta le 3 sezioni con separatori visivi
+                _sections = str(_bt).split("\n")
+                _formatted = ""
+                for _line in _sections:
+                    _l = _line.strip()
+                    if not _l:
+                        _formatted += "<br>"
+                    elif any(_l.startswith(str(n) + ".") for n in [1, 2, 3]):
+                        # Titolo sezione
+                        _formatted += (
+                            f'<div style="font-size:11px;font-weight:800;color:#1565C0;'
+                            f'text-transform:uppercase;letter-spacing:0.5px;'
+                            f'margin:10px 0 4px;border-bottom:1px solid #e3f2fd;padding-bottom:3px">'
+                            f'{_l}</div>'
+                        )
+                    else:
+                        _formatted += f'<span>{_l}</span><br>'
                 st.markdown(
-                    '<div class="ai-box" style="margin:8px 12px 0;border-left-color:#1565C0">' +
-                    '<div style="font-size:10px;font-weight:700;color:#1565C0;margin-bottom:4px">'
-                    '&#129302; BRIEFING COACH &middot; OGGI</div>' +
-                    _bt + '</div>',
+                    '<div class="mob-card" style="margin-top:8px">'
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+                    '<div class="mob-card-title" style="margin:0">🤖 BRIEFING COACH · OGGI</div>'
+                    f'<div style="font-size:10px;color:#bbb">{datetime.now().strftime("%d/%m")}</div>'
+                    '</div>'
+                    f'<div style="font-size:14px;line-height:1.7;color:#212529">{_formatted}</div>'
+                    '<div style="margin-top:10px;text-align:right">',
                     unsafe_allow_html=True)
+                if st.button("🔄 Rigenera briefing", key="regen_brief", use_container_width=False):
+                    if _bkey in st.session_state:
+                        del st.session_state[_bkey]
+                    st.rerun()
+                st.markdown('</div></div>', unsafe_allow_html=True)
 
     # ── Ultime 5 attività ──
     st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 4px;color:#1a1a1a">&#127885; Ultime attività</h4></div>',
@@ -2621,7 +2647,8 @@ elif st.session_state.mob_menu == "profilo":
     # Nota info modello
     _notes = {
         "auto":                              "Sceglie automaticamente il modello migliore disponibile.",
-        "gemini-2.5-flash-preview-04-17":    "⭐ Default consigliato. Veloce, intelligente, ottimo per il coaching.",
+        "gemini-3.1-flash-lite-preview":     "⭐ Default. Velocissimo e intelligente — ultima generazione.",
+        "gemini-2.5-flash-preview-04-17":    "Veloce, intelligente, ottimo per il coaching.",
         "gemini-2.5-flash-preview-05-20":    "Versione aggiornata di Gemini 2.5 Flash.",
         "gemini-2.5-flash-preview":          "Gemini 2.5 Flash — veloce e potente.",
         "gemini-2.5-pro-preview-05-06":      "Migliore qualità, più lento. Ideale per analisi approfondite.",
