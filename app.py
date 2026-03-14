@@ -16,6 +16,54 @@ import calendar as cal_module
 # ============================================================
 REDIRECT_URI = "https://elite-ai-coach-mobile.streamlit.app"  # ← aggiorna con il tuo URL mobile
 
+# ============================================================
+# FETCH GPX ON-DEMAND DA STRAVA
+# ============================================================
+@st.cache_data(ttl=3600)
+def fetch_activity_details_from_strava(activity_id: int, access_token: str):
+    """
+    Fetcha i dettagli completi di un'attività da Strava.
+    Include: polyline completo, splits, dati della traccia.
+    Cache: 1 ora (evita chiamate ripetute per la stessa attività).
+    """
+    try:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}"
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        return data
+    except Exception as e:
+        st.error(f"❌ Errore nel fetch da Strava: {str(e)}")
+        return None
+
+@st.cache_data(ttl=3600)
+def fetch_activity_streams_from_strava(activity_id: int, access_token: str, 
+                                       stream_types: str = "latlng,altitude,cadence,heartrate,velocity_smooth,power"):
+    """
+    Fetcha gli stream GPS ad alta precisione da Strava.
+    Include: coordinate lat/lng, altitudine, cadenza, FC, velocità, potenza.
+    Cache: 1 ora
+    """
+    try:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams"
+        
+        params = {
+            "keys": stream_types,
+            "key_by_type": True
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception as e:
+        st.warning(f"⚠️ Stream GPS non disponibile: {str(e)}")
+        return None
+
 def get_secret(key):
     return st.secrets.get(key) or os.getenv(key)
 
@@ -1511,7 +1559,9 @@ if st.session_state.selected_act_id is not None:
         c6.metric("⚡ Watt",     m["watts"])
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Mappa 2D / 3D
+        # ============================================================
+        # MAPPA 2D / 3D — CON FETCH ON-DEMAND DA STRAVA
+        # ============================================================
         import streamlit.components.v1 as _components
         def _get_polyline(row_data):
             """Estrae summary_polyline gestendo dict, stringa JSON o stringa diretta."""
@@ -1535,16 +1585,45 @@ if st.session_state.selected_act_id is not None:
                 return _sp
             return None
 
+        # Primo tentativo: polyline dalle cache (GSheet)
         poly = _get_polyline(row)
+        
+        # Se non trovata, offri fetch on-demand da Strava
+        if not poly:
+            st.markdown('<div class="mob-card"><div class="mob-card-title">🗺️ Traccia GPS</div>',
+                        unsafe_allow_html=True)
+            st.info("Traccia GPS non in cache. Clicca il pulsante per caricarla da Strava.")
+            
+            if st.button("📥 Carica traccia da Strava", use_container_width=True, key=f"fetch_gpx_{_sid}"):
+                with st.spinner("⏳ Caricamento traccia GPS da Strava..."):
+                    detailed_data = fetch_activity_details_from_strava(_sid, access_token)
+                    
+                    if detailed_data and detailed_data.get("map"):
+                        poly = detailed_data["map"].get("summary_polyline")
+                        
+                        if poly:
+                            st.success("✅ Traccia caricata!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Traccia non disponibile per questa attività su Strava.")
+                    else:
+                        st.error("❌ Errore nel caricamento da Strava.")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        # Mostra mappa se polyline disponibile
         if poly:
+            st.markdown('<div class="mob-card"><div class="mob-card-title">🗺️ Traccia GPS</div>',
+                        unsafe_allow_html=True)
+            
             if MAPBOX_TOKEN:
                 _t2d, _t3d = st.tabs(["🗺️ Mappa 2D", "🏔️ Mappa 3D"])
                 with _t2d:
                     mobj = draw_map(poly, height=230)
                     if mobj:
-                        st_folium(mobj, width=None, height=230, key=f"det_map_2d_{_aid}")
+                        st_folium(mobj, width=None, height=230, key=f"det_map_2d_{_sid}")
                     else:
-                        st.info("Tracciato GPS non disponibile.")
+                        st.info("❌ Errore nel rendering della mappa 2D.")
                 with _t3d:
                     _eg  = float(row.get("total_elevation_gain") or 0)
                     _h3d = build_map3d_html(poly, MAPBOX_TOKEN,
@@ -1556,11 +1635,11 @@ if st.session_state.selected_act_id is not None:
             else:
                 mobj = draw_map(poly, height=230)
                 if mobj:
-                    st_folium(mobj, width=None, height=230, key=f"det_map_{_aid}")
+                    st_folium(mobj, width=None, height=230, key=f"det_map_{_sid}")
                 else:
-                    st.info("Tracciato GPS non disponibile.")
-        else:
-            st.info("Nessun tracciato GPS per questa attività.")
+                    st.error("❌ Errore nel rendering della mappa.")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
 
         # Zone FC — stile Garmin con barre orizzontali
         hr_avg = row.get("average_heartrate")
