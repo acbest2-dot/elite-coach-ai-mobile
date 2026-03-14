@@ -185,30 +185,6 @@ st.markdown("""
   .nav-label { font-size: 10px; font-weight: 600; color: #555; }
   .nav-item.active .nav-label { color: #1565C0; }
 
-  /* Pulsanti nav reali — invisibili ma cliccabili, sovrapposti alla nav bar */
-  div[data-testid="stHorizontalBlock"]:has(button[kind="secondary"][data-baseweb="button"]) {
-      position: fixed !important;
-      bottom: 0 !important;
-      left: 0 !important;
-      right: 0 !important;
-      z-index: 1001 !important;
-      background: transparent !important;
-      padding: 0 !important;
-      gap: 0 !important;
-      height: 64px !important;
-  }
-  div[data-testid="stHorizontalBlock"]:has(button[kind="secondary"][data-baseweb="button"]) > div {
-      padding: 0 !important;
-  }
-  /* Nascondi testo nei pulsanti nav, mantieni solo area cliccabile */
-  button[key^="nav_btn_"] {
-      opacity: 0 !important;
-      height: 64px !important;
-      min-height: 64px !important;
-      border: none !important;
-      background: transparent !important;
-  }
-
   /* Card generica */
   .mob-card {
       background: #ffffff;
@@ -901,6 +877,9 @@ def draw_map(encoded_polyline, height=220):
 # ============================================================
 # Modelli flash in ordine di preferenza (più recente → più vecchio)
 _FLASH_MODELS = [
+    "gemini-2.5-flash-preview-04-17",
+    "gemini-2.5-flash-preview-05-20",
+    "gemini-2.5-flash-preview",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-1.5-flash",
@@ -910,6 +889,7 @@ _FLASH_MODELS = [
 _PRO_MODELS = [
     "gemini-2.5-pro-preview-05-06",
     "gemini-2.5-pro-preview-03-25",
+    "gemini-2.5-flash-preview-04-17",
     "gemini-2.0-flash",
     "gemini-1.5-pro",
     "gemini-1.5-flash",
@@ -929,6 +909,8 @@ def _discover_available_models() -> dict:
             discovered = []
         # Unisci con statica
         static = [
+            "gemini-2.5-flash-preview-04-17",
+            "gemini-2.5-flash-preview-05-20",
             "gemini-2.5-pro-preview-05-06",
             "gemini-2.5-pro-preview-03-25",
             "gemini-2.5-flash-preview",
@@ -1281,10 +1263,11 @@ for key, val in {
     "mob_menu":           "dashboard",
     "selected_act_id":    None,
     "gsheet_loaded":      False,
-    "ai_model_pref":      "auto",
+    "ai_model_pref":      "gemini-2.5-flash-preview-04-17",
     "conv_loaded":        False,
     "weekly_plan":        None,
     "weekly_plan_date":   None,
+    "_chat_pending":      False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -1313,22 +1296,67 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Bottom nav: overlay CSS sopra i pulsanti Streamlit reali."""
+    """Bottom nav affidabile: pulsanti Streamlit reali con CSS migliorato."""
     cur = st.session_state.mob_menu
 
-    # HTML decorativo (solo visivo, non clickabile)
+    # HTML decorativo fisso (solo visivo)
     items_html = ""
     for key, icon, label in NAV_ITEMS:
         active_cls = "active" if cur == key else ""
         items_html += (
-            f'<div class="nav-item {active_cls}">' 
+            f'<div class="nav-item {active_cls}">'
             f'<span class="nav-icon">{icon}</span>'
             f'<span class="nav-label">{label}</span>'
             f'</div>'
         )
     st.markdown(f'<div class="bottom-nav-decor">{items_html}</div>', unsafe_allow_html=True)
 
-    # Pulsanti reali sovrapposti con CSS — coprono esattamente la nav bar
+    # Container pulsanti reali — posizionato sulla nav bar tramite CSS raffinato
+    st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"].nav-real-buttons {
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 1002 !important;
+        background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        height: 64px !important;
+        gap: 0 !important;
+    }
+    div[data-testid="stHorizontalBlock"].nav-real-buttons > div {
+        padding: 0 !important;
+        flex: 1 !important;
+    }
+    div[data-testid="stHorizontalBlock"].nav-real-buttons button {
+        opacity: 0 !important;
+        height: 64px !important;
+        min-height: 64px !important;
+        width: 100% !important;
+        border: none !important;
+        background: transparent !important;
+        cursor: pointer !important;
+    }
+    </style>
+    <script>
+    (function() {
+        // Aggiunge classe al prossimo stHorizontalBlock inserito nel DOM
+        const observer = new MutationObserver(() => {
+            const blocks = document.querySelectorAll('[data-testid="stHorizontalBlock"]:not(.nav-real-buttons)');
+            blocks.forEach(b => {
+                const btns = b.querySelectorAll('button');
+                if (btns.length === 5) {
+                    b.classList.add('nav-real-buttons');
+                }
+            });
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    })();
+    </script>
+    """, unsafe_allow_html=True)
+
     cols = st.columns(5)
     for i, (key, icon, label) in enumerate(NAV_ITEMS):
         with cols[i]:
@@ -1592,22 +1620,31 @@ if st.session_state.selected_act_id is not None:
         if not poly:
             st.markdown('<div class="mob-card"><div class="mob-card-title">🗺️ Traccia GPS</div>',
                         unsafe_allow_html=True)
-            st.info("Traccia GPS non in cache. Clicca il pulsante per caricarla da Strava.")
-            
-            if st.button("📥 Carica traccia da Strava", use_container_width=True, key=f"fetch_gpx_{_sid}"):
-                with st.spinner("⏳ Caricamento traccia GPS da Strava..."):
-                    detailed_data = fetch_activity_details_from_strava(_sid, access_token)
-                    
-                    if detailed_data and detailed_data.get("map"):
-                        poly = detailed_data["map"].get("summary_polyline")
+
+            # Controlla se abbiamo già fetchato e salvato in session_state
+            _poly_key = f"poly_cache_{_sid}"
+            if _poly_key in st.session_state:
+                poly = st.session_state[_poly_key]
+            else:
+                st.info("Traccia GPS non in cache. Clicca il pulsante per caricarla da Strava.")
+                
+                if st.button("📥 Carica traccia da Strava", use_container_width=True, key=f"fetch_gpx_{_sid}"):
+                    with st.spinner("⏳ Caricamento traccia GPS da Strava..."):
+                        detailed_data = fetch_activity_details_from_strava(_sid, access_token)
                         
-                        if poly:
-                            st.success("✅ Traccia caricata!")
-                            st.rerun()
+                        if detailed_data and detailed_data.get("map"):
+                            _fetched_poly = detailed_data["map"].get("summary_polyline")
+                            
+                            if _fetched_poly:
+                                # Salva in session_state PRIMA del rerun
+                                st.session_state[_poly_key] = _fetched_poly
+                                poly = _fetched_poly
+                                st.success("✅ Traccia caricata!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Traccia non disponibile per questa attività su Strava.")
                         else:
-                            st.error("❌ Traccia non disponibile per questa attività su Strava.")
-                    else:
-                        st.error("❌ Errore nel caricamento da Strava.")
+                            st.error("❌ Errore nel caricamento da Strava.")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
@@ -2364,7 +2401,50 @@ elif st.session_state.mob_menu == "storico":
 # ── MENU: COACH CHAT ─────────────────────────────────────────
 # ============================================================
 elif st.session_state.mob_menu == "chat":
-    st.markdown('<div class="sec-pad"><h3 style="margin:12px 0 4px">💬 Coach Chat</h3></div>',
+
+    st.markdown("""
+    <style>
+    /* Chat container scrollabile */
+    .chat-messages-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding-bottom: 8px;
+    }
+    /* Animazione typing */
+    .typing-dots span {
+        display: inline-block;
+        width: 7px; height: 7px;
+        margin: 0 2px;
+        background: #1565C0;
+        border-radius: 50%;
+        animation: bounce 1.2s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+        0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    /* Quick prompt buttons */
+    .qp-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        padding: 8px 12px 0;
+    }
+    /* Streamlit chat input fix — sempre visibile sopra la nav */
+    div[data-testid="stChatInput"] {
+        position: sticky !important;
+        bottom: 68px !important;
+        background: #f0f2f6 !important;
+        padding: 8px 0 4px !important;
+        z-index: 998 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="sec-pad"><h3 style="margin:12px 0 4px">💬 Coach AI</h3></div>',
                 unsafe_allow_html=True)
 
     if _ai_sdk_mode is None:
@@ -2372,9 +2452,10 @@ elif st.session_state.mob_menu == "chat":
     else:
         # Contesto coach ricco — 6 mesi dati completi
         if "chat_ctx_cache" not in st.session_state:
-            st.session_state["chat_ctx_cache"] = build_chat_context(
-                df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val
-            )
+            with st.spinner("📊 Carico contesto atleta..."):
+                st.session_state["chat_ctx_cache"] = build_chat_context(
+                    df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val
+                )
         _ctx_sys = (
             "Sei un coach sportivo d'elite specializzato in ciclismo, trail running e sci alpinismo. "
             "Sei sia ANALISTA (spieghi i dati, le cause, i trend) "
@@ -2386,61 +2467,102 @@ elif st.session_state.mob_menu == "chat":
             + st.session_state["chat_ctx_cache"]
         )
 
-        # Mostra messaggi
-        for msg in st.session_state.messages:
-            if msg["role"] == "user":
-                st.markdown(f'<div class="chat-label">Tu</div>'
-                            f'<div class="chat-user">{msg["content"]}</div>',
-                            unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="chat-label">🤖 Coach</div>'
-                            f'<div class="chat-ai">{msg["content"]}</div>',
-                            unsafe_allow_html=True)
+        # Stato forma rapido in cima alla chat
+        _tsb_col = "#4CAF50" if current_tsb > 10 else ("#FF9800" if current_tsb > -5 else "#F44336")
+        st.markdown(f"""
+        <div style="display:flex;gap:8px;align-items:center;padding:4px 12px 8px;
+                    font-size:12px;color:#666;flex-wrap:wrap">
+            <span>CTL <b style="color:#4CAF50">{current_ctl:.0f}</b></span>
+            <span>ATL <b style="color:#F44336">{current_atl:.0f}</b></span>
+            <span>TSB <b style="color:{_tsb_col}">{current_tsb:+.0f}</b></span>
+            <span style="background:{status_color}22;color:{status_color};
+                         padding:2px 8px;border-radius:20px;font-weight:700">{status_label}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # Pulsanti suggerimento veloci
-        st.markdown('<div class="sec-pad" style="margin-top:8px">', unsafe_allow_html=True)
+        # Quick prompts (solo se chat vuota o come suggerimenti)
+        if not st.session_state.messages:
+            st.markdown("""
+            <div style="text-align:center;padding:20px 12px 8px">
+                <div style="font-size:40px">🏆</div>
+                <div style="font-size:15px;font-weight:700;color:#1565C0;margin:8px 0 4px">Coach AI</div>
+                <div style="font-size:13px;color:#888">Chiedi qualsiasi cosa sul tuo allenamento</div>
+            </div>
+            """, unsafe_allow_html=True)
+
         quick_prompts = [
-            "Come sto fisicamente?",
-            "Cosa fare oggi?",
-            "Piano per questa settimana",
-            "Analizza il mio allenamento",
+            "💪 Come sto fisicamente?",
+            "🗓️ Cosa fare oggi?",
+            "📋 Piano questa settimana",
+            "📊 Analizza gli ultimi 30gg",
         ]
+        st.markdown('<div class="qp-grid">', unsafe_allow_html=True)
         qc = st.columns(2)
         for i, qp in enumerate(quick_prompts):
             with qc[i % 2]:
-                if st.button(qp, use_container_width=True, key=f"qp_{i}"):
-                    st.session_state.messages.append({"role":"user","content":qp})
-                    with st.spinner("Il coach risponde..."):
-                        _hlines = [("Atleta" if _m["role"]=="user" else "Coach") + ": " + str(_m["content"])
-                                   for _m in st.session_state.messages[-10:]]
-                        res = ai_deep(_ctx_sys + "\n\n=== CONVERSAZIONE ===\n" + "\n".join(_hlines))
-                        st.session_state.messages.append({"role":"assistant","content":res})
-                    if _gsheet_ok:
-                        gsheet_save_conversations(st.session_state.messages)
+                if st.button(qp, use_container_width=True, key=f"qp_{i}",
+                             type="secondary"):
+                    clean_qp = qp.split(" ", 1)[1] if qp[0] in "💪🗓📋📊" else qp
+                    st.session_state.messages.append({"role": "user", "content": clean_qp})
+                    st.session_state["_chat_pending"] = True
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Input chat
+        # Mostra messaggi con bubble pulite
+        st.markdown('<div class="chat-messages-wrap">', unsafe_allow_html=True)
+        for msg in st.session_state.messages:
+            if msg["role"] == "user":
+                st.markdown(
+                    f'<div class="chat-label" style="text-align:right;margin-right:14px">Tu</div>'
+                    f'<div class="chat-user">{msg["content"]}</div>',
+                    unsafe_allow_html=True)
+            else:
+                content = str(msg["content"]).replace("\n", "<br>")
+                st.markdown(
+                    f'<div class="chat-label" style="margin-left:14px">🤖 Coach</div>'
+                    f'<div class="chat-ai">{content}</div>',
+                    unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Risposta pendente (dopo quick prompt o invio)
+        if st.session_state.get("_chat_pending") and st.session_state.messages:
+            last_msg = st.session_state.messages[-1]
+            if last_msg["role"] == "user":
+                # Mostra indicatore typing
+                st.markdown(
+                    '<div class="chat-label" style="margin-left:14px">🤖 Coach</div>'
+                    '<div class="chat-ai" style="padding:12px 16px">'
+                    '<div class="typing-dots"><span></span><span></span><span></span></div>'
+                    '</div>',
+                    unsafe_allow_html=True)
+                _hlines = [
+                    ("Atleta" if _m["role"] == "user" else "Coach") + ": " + str(_m["content"])
+                    for _m in st.session_state.messages[-12:]
+                ]
+                res = ai_deep(_ctx_sys + "\n\n=== CONVERSAZIONE ===\n" + "\n".join(_hlines))
+                st.session_state.messages.append({"role": "assistant", "content": res})
+                st.session_state["_chat_pending"] = False
+                if _gsheet_ok:
+                    gsheet_save_conversations(st.session_state.messages)
+                st.rerun()
+
+        # Input chat — sticky sopra la nav bar
         if prompt := st.chat_input("Scrivi al tuo coach..."):
-            st.session_state.messages.append({"role":"user","content":prompt})
-            with st.spinner("Il coach risponde..."):
-                _hlines2 = [("Atleta" if _m["role"]=="user" else "Coach") + ": " + str(_m["content"])
-                            for _m in st.session_state.messages[-12:]]
-                res = ai_deep(_ctx_sys + "\n\n=== CONVERSAZIONE ===\n" + "\n".join(_hlines2))
-                st.session_state.messages.append({"role":"assistant","content":res})
-            if _gsheet_ok:
-                gsheet_save_conversations(st.session_state.messages)
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state["_chat_pending"] = True
             st.rerun()
 
+        # Azioni in fondo
         if st.session_state.messages:
-            st.markdown('<div class="sec-pad">', unsafe_allow_html=True)
+            st.markdown('<div class="sec-pad" style="margin-top:4px">', unsafe_allow_html=True)
             c_clr1, c_clr2 = st.columns(2)
             with c_clr1:
-                if st.button("&#128465; Nuova chat", use_container_width=True):
+                if st.button("🗑️ Nuova chat", use_container_width=True):
                     st.session_state.messages = []
+                    st.session_state["_chat_pending"] = False
                     st.rerun()
             with c_clr2:
-                if st.button("&#128260; Aggiorna contesto", use_container_width=True):
+                if st.button("🔄 Aggiorna dati", use_container_width=True):
                     if "chat_ctx_cache" in st.session_state:
                         del st.session_state["chat_ctx_cache"]
                     st.rerun()
@@ -2498,14 +2620,17 @@ elif st.session_state.mob_menu == "profilo":
                 unsafe_allow_html=True)
     # Nota info modello
     _notes = {
-        "auto":                         "Sceglie automaticamente il modello migliore disponibile.",
-        "gemini-2.5-pro-preview-05-06": "Migliore qualità, più lento. Ideale per analisi approfondite.",
-        "gemini-2.0-flash":             "Ottimo equilibrio velocità/qualità. Consigliato.",
-        "gemini-2.0-flash-lite":        "Molto veloce, qualità leggermente inferiore.",
-        "gemini-1.5-flash":             "Fallback affidabile se i modelli 2.x sono esauriti.",
-        "gemini-1.5-pro":               "Buona qualità, compatibile con SDK vecchio.",
-        "grok-3-fast":                  "Richiede XAI_API_KEY nei Secrets.",
-        "grok-3":                       "Richiede XAI_API_KEY nei Secrets.",
+        "auto":                              "Sceglie automaticamente il modello migliore disponibile.",
+        "gemini-2.5-flash-preview-04-17":    "⭐ Default consigliato. Veloce, intelligente, ottimo per il coaching.",
+        "gemini-2.5-flash-preview-05-20":    "Versione aggiornata di Gemini 2.5 Flash.",
+        "gemini-2.5-flash-preview":          "Gemini 2.5 Flash — veloce e potente.",
+        "gemini-2.5-pro-preview-05-06":      "Migliore qualità, più lento. Ideale per analisi approfondite.",
+        "gemini-2.0-flash":                  "Ottimo equilibrio velocità/qualità.",
+        "gemini-2.0-flash-lite":             "Molto veloce, qualità leggermente inferiore.",
+        "gemini-1.5-flash":                  "Fallback affidabile se i modelli 2.x sono esauriti.",
+        "gemini-1.5-pro":                    "Buona qualità, compatibile con SDK vecchio.",
+        "grok-3-fast":                       "Richiede XAI_API_KEY nei Secrets.",
+        "grok-3":                            "Richiede XAI_API_KEY nei Secrets.",
     }
     st.markdown(f'<div style="font-size:12px;color:#888;margin-top:4px">ℹ️ {_notes.get(_sel_model,"")}</div>',
                 unsafe_allow_html=True)
