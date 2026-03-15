@@ -117,11 +117,9 @@ st.set_page_config(
 )
 
 # ============================================================
-# CSS MOBILE — iniettato una sola volta per sessione
+# CSS MOBILE
 # ============================================================
-if not st.session_state.get("_css_injected"):
-    st.session_state["_css_injected"] = True
-    st.markdown("""
+st.markdown("""
 <style>
   /* Reset e base mobile */
   * { box-sizing: border-box; }
@@ -132,9 +130,9 @@ if not st.session_state.get("_css_injected"):
   [data-testid="collapsedControl"] { display: none !important; }
   section[data-testid="stSidebar"] { display: none !important; }
 
-  /* Padding per nav bar in alto */
+  /* Padding per contenuto — spazio in basso per nav bar */
   .block-container {
-      padding: 60px 0 20px 0 !important;
+      padding: 0 0 72px 0 !important;
       max-width: 100% !important;
   }
 
@@ -142,10 +140,10 @@ if not st.session_state.get("_css_injected"):
   .mob-header {
       background: linear-gradient(135deg, #1565C0, #0D47A1);
       color: white;
-      padding: 12px 20px 10px;
+      padding: 14px 20px 10px;
       margin-bottom: 0;
       position: sticky;
-      top: 52px;
+      top: 0;
       z-index: 998;
   }
   .mob-header h1 {
@@ -361,10 +359,17 @@ if not st.session_state.get("_css_injected"):
       flex-shrink: 0;
   }
 
-  /* Hide streamlit branding */
+  /* Hide streamlit branding e toolbar che overlappano la nav */
   #MainMenu { visibility: hidden; }
   footer { visibility: hidden; }
   header { visibility: hidden; }
+  /* Nasconde il toolbar di Streamlit Cloud (hamburger + manage app) su mobile */
+  [data-testid="stToolbar"] { display: none !important; }
+  [data-testid="stDecoration"] { display: none !important; }
+  [data-testid="stStatusWidget"] { display: none !important; }
+  .stDeployButton { display: none !important; }
+  /* Alza la barra nav per evitare overlap con eventuali icone residue */
+  .bottom-nav-bar { bottom: 8px !important; border-radius: 16px !important; margin: 0 8px !important; right: 8px !important; left: 8px !important; }
 </style>
 """, unsafe_allow_html=True)
 # fine CSS injection
@@ -1600,14 +1605,15 @@ def render_bottom_nav():
 <style>
 .bottom-nav-bar {{
     position: fixed;
-    top: 0; left: 0; right: 0;
-    height: 52px;
+    bottom: 8px; left: 8px; right: 8px;
+    height: 54px;
     background: #ffffff;
-    border-bottom: 1.5px solid #e8e8e8;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    border: 1.5px solid #e8e8e8;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
     display: flex;
     z-index: 99999;
-    padding: 4px 6px 4px;
+    padding: 4px 6px;
 }}
 .nav-tab {{
     flex: 1;
@@ -1615,7 +1621,7 @@ def render_bottom_nav():
     align-items: center;
     justify-content: center;
     text-decoration: none;
-    border-radius: 10px;
+    border-radius: 12px;
     transition: background 0.12s;
     -webkit-tap-highlight-color: transparent;
 }}
@@ -2500,7 +2506,8 @@ if st.session_state.mob_menu == "dashboard":
                     st_folium(_mobj5, width=None, height=200, key="dash_map_0")
 
             # AI automatico — si carica subito senza pulsante
-            _ak5 = f"dash_ai_{_id5}"
+            _ak5  = f"dash_ai_{_id5}"
+            _tss5 = f"{_row5['tss']:.0f}"
             if _ak5 not in st.session_state and _ai_sdk_mode is not None:
                 with st.spinner("&#129302; Coach analizza l'ultima uscita..."):
                     _ctx5 = (
