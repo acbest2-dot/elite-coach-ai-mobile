@@ -1674,7 +1674,7 @@ div[data-testid="stBottom"] button[kind="primary"] {
 
 
 def get_act_micro_comment(row_data, metrics, sport_info) -> str:
-    """Genera (e cacha) un brevissimo commento AI per la card attività — max 6 parole."""
+    """Genera (e cacha) un commento AI specifico basato sui dati reali dell'attività."""
     _act_id = row_data.get("id", str(row_data.get("start_date", "")))
     _key = f"micro_ai_{_act_id}"
     if _key in st.session_state:
@@ -1683,17 +1683,56 @@ def get_act_micro_comment(row_data, metrics, sport_info) -> str:
         return ""
     m = metrics
     s = sport_info
+
+    # Raccoglie tutti i dati disponibili per il commento
+    _name      = str(row_data.get("name", ""))
+    _type      = s["label"]
+    _dist      = m["dist_str"]
+    _dur       = m["dur_str"]
+    _elev      = m["elev"]
+    _hr_avg    = m["hr_avg"]
+    _hr_max    = m["hr_max"]
+    _pace      = m["pace_str"]
+    _cals      = m["cals"]
+    _watts_avg = row_data.get("average_watts")
+    _watts_max = row_data.get("max_watts")
+    _speed_max = row_data.get("max_speed")  # m/s
+    _cadence   = row_data.get("average_cadence")
+    _suffer    = row_data.get("suffer_score")
+    _tss       = f"{row_data.get('tss', 0):.0f}"
+
+    # Costruisce lista dati significativi da includere nel prompt
+    _extra = []
+    if pd.notna(_watts_avg) and _watts_avg and _watts_avg > 0:
+        _extra.append(f"potenza media {_watts_avg:.0f}W")
+    if pd.notna(_watts_max) and _watts_max and _watts_max > 0:
+        _extra.append(f"picco potenza {_watts_max:.0f}W")
+    if pd.notna(_speed_max) and _speed_max and _speed_max > 0:
+        _kmh_max = float(_speed_max) * 3.6
+        _extra.append(f"velocità max {_kmh_max:.0f} km/h")
+    if pd.notna(_hr_max) and _hr_max != "—":
+        _extra.append(f"FC max {_hr_max} bpm")
+    if pd.notna(_suffer) and _suffer and float(_suffer) > 0:
+        _extra.append(f"suffer score {_suffer:.0f}")
+    if pd.notna(_cadence) and _cadence and _cadence > 0:
+        _extra.append(f"cadenza {_cadence:.0f} rpm")
+    _extra_str = ", ".join(_extra) if _extra else ""
+
     _prompt = (
-        f"Attività: {s['label']}, {m['dist_str']}, {m['dur_str']}, "
-        f"D+{m['elev']}, FC {m['hr_avg']} bpm, {m['pace_str']}. "
-        f"Nome: {str(row_data.get('name',''))}. "
-        "Scrivi UNA frase brevissima (4-7 parole) che descriva questa sessione in modo specifico. "
-        "Es: 'Lungo aerobico in Z2' oppure 'Scialpinismo sul Sirente'. "
-        "Solo la frase, niente altro."
+        f"Attività Strava: {_type}, nome='{_name}', {_dist}, {_dur}, "
+        f"D+{_elev}, FC media {_hr_avg} bpm, {_pace}, TSS {_tss}"
+        + (f", {_extra_str}" if _extra_str else "") + ".\n"
+        "Scrivi UNA frase brevissima (5-8 parole) SPECIFICA su questa sessione.\n"
+        "Regole:\n"
+        "- Se il nome contiene un luogo geografico (monte, passo, vallata, paese), usalo.\n"
+        "- Se c'è un dato numerico notevole (picco velocità, potenza, FC max alta, dislivello elevato), citalo.\n"
+        "- Se nessun dato spicca, descrivi il tipo di sforzo (Z2 lungo, ritmo soglia, recupero, ecc).\n"
+        "- MAI scrivere frasi generiche come 'buona uscita' o 'allenamento completato'.\n"
+        "- Risposta: SOLO la frase, niente punteggiatura finale, niente virgolette."
     )
     try:
-        _res = ai_generate(_prompt, max_tokens=30)
-        _res = _res.strip().strip('"').strip("'")
+        _res = ai_generate(_prompt, max_tokens=40)
+        _res = _res.strip().strip('"').strip("'").rstrip(".")
         st.session_state[_key] = _res
         return _res
     except Exception:
@@ -2480,8 +2519,8 @@ if st.session_state.mob_menu == "dashboard":
     for _ico, _val, _lbl in _w7_metrics:
         _recap_html += (
             f'<div style="background:#f8f9fa;border-radius:10px;padding:8px 6px;text-align:center">'
-            f'<div style="font-size:10px;color:#aaa;margin-bottom:2px">{_ico} {_lbl}</div>'
-            f'<div style="font-size:20px;font-weight:900;color:#1565C0;line-height:1">{_val}</div>'
+            f'<div style="font-size:12px;color:#888;margin-bottom:3px">{_ico} {_lbl}</div>'
+            f'<div style="font-size:20px;font-weight:900;color:#1a1a1a;line-height:1">{_val}</div>'
             f'</div>'
         )
     _recap_html += '</div></div>'
