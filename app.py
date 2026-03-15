@@ -271,22 +271,74 @@ st.markdown("""
       color: var(--gray900); font-size: 14px; line-height: 1.75;
   }
 
-  /* ── CHAT BUBBLES ── */
+  /* ── CHAT BUBBLES con avatar ── */
+  .chat-row {
+      display: flex; align-items: flex-end; gap: 8px;
+      margin: 6px 12px;
+  }
+  .chat-row.user { flex-direction: row-reverse; }
+  .chat-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0;
+  }
+  .chat-avatar.coach {
+      background: linear-gradient(135deg, var(--navy), var(--blue2));
+      color: white; font-size: 16px;
+  }
+  .chat-avatar.user-av {
+      background: var(--gray200); color: var(--gray700); font-size: 12px;
+  }
+  .chat-bubble-wrap { display: flex; flex-direction: column; max-width: calc(100% - 48px); }
+  .chat-bubble-wrap.user { align-items: flex-end; }
   .chat-user {
       background: linear-gradient(135deg, var(--blue) 0%, var(--blue2) 100%);
       color: white; border-radius: 18px 18px 4px 18px;
-      padding: 10px 14px; margin: 4px 12px 4px 52px;
-      font-size: 14px; line-height: 1.5;
+      padding: 10px 14px; font-size: 14px; line-height: 1.5;
       box-shadow: 0 2px 8px rgba(26,86,219,0.25);
   }
   .chat-ai {
       background: #ffffff; color: var(--gray900);
       border-radius: 18px 18px 18px 4px;
-      padding: 10px 14px; margin: 4px 52px 4px 12px;
-      font-size: 14px; line-height: 1.5;
+      padding: 10px 14px; font-size: 14px; line-height: 1.5;
       box-shadow: 0 1px 6px rgba(0,0,0,0.08);
   }
-  .chat-label { font-size: 10px; color: var(--gray400); margin: 0 12px 2px; font-weight: 600; }
+  .chat-ts {
+      font-size: 10px; color: var(--gray400);
+      margin-top: 3px; padding: 0 2px;
+  }
+
+  /* ── QUICK PROMPTS card-style ── */
+  .qp-card {
+      background: #fff; border: 1px solid var(--gray200);
+      border-radius: 14px; padding: 10px 12px;
+      cursor: pointer; transition: all 0.15s;
+  }
+  .qp-card:hover { border-color: var(--blue); box-shadow: 0 2px 8px rgba(26,86,219,0.12); }
+  .qp-card-icon { font-size: 20px; margin-bottom: 4px; }
+  .qp-card-title { font-size: 13px; font-weight: 700; color: var(--gray900); }
+  .qp-card-sub   { font-size: 11px; color: var(--gray400); margin-top: 2px; }
+
+  /* ── BRIEFING sezioni card ── */
+  .brief-section {
+      border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+  }
+  .brief-section-icon {
+      font-size: 20px; margin-bottom: 6px; display: block;
+  }
+  .brief-section-title {
+      font-size: 10px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.7px; margin-bottom: 6px;
+  }
+  .brief-section-body {
+      font-size: 14px; line-height: 1.7;
+  }
+  /* Highlight numeri nel briefing */
+  .brief-num {
+      background: rgba(26,86,219,0.1); color: var(--blue);
+      border-radius: 6px; padding: 1px 5px;
+      font-weight: 700; font-size: 13px;
+  }
 
   /* ── BUTTONS ── */
   div[data-testid="stButton"] > button {
@@ -1734,8 +1786,8 @@ def build_structured_weekly_plan(df, u, current_ctl, current_atl, current_tsb,
 # BOTTOM NAV BAR
 # ============================================================
 NAV_ITEMS = [
-    ("dashboard", "📊", "Home"),
-    ("fitness",   "💪", "Fitness"),
+    ("dashboard", "🏠", "Home"),
+    ("fitness",   "📈", "Fitness"),
     ("storico",   "📅", "Storico"),
     ("chat",      "💬", "Coach"),
     ("profilo",   "👤", "Profilo"),
@@ -2821,34 +2873,68 @@ if st.session_state.mob_menu == "dashboard":
         if _bkey in st.session_state:
             _bt = st.session_state[_bkey]
             if not str(_bt).startswith("⚠️"):
-                _sections = str(_bt).split("\n")
-                _formatted = ""
-                for _line in _sections:
-                    _l = _line.strip()
-                    if not _l:
-                        _formatted += "<br>"
-                    elif any(_l.startswith(str(n) + ".") for n in [1, 2, 3]):
-                        _formatted += (
-                            f'<div style="font-size:10px;font-weight:800;color:#1A56DB;'
-                            f'text-transform:uppercase;letter-spacing:0.7px;'
-                            f'margin:12px 0 4px;padding-bottom:3px;'
-                            f'border-bottom:1px solid #E8EAE0">{_l}</div>'
+                import re as _re
+
+                # Configurazione sezioni
+                _section_cfg = [
+                    ("1.", "📈", "Stato Forma", "#EFF6FF", "#1D4ED8"),
+                    ("2.", "🏅", "Ultime Sessioni", "#F0FDF4", "#15803D"),
+                    ("3.", "🗓️", "Prossimi Giorni", "#FFF7ED", "#C2410C"),
+                ]
+
+                # Splitta il testo nelle 3 sezioni
+                _raw_text = str(_bt)
+                _sections_text = []
+                _parts = _re.split(r'(?=\b[123]\.\s)', _raw_text)
+                for _p in _parts:
+                    _p = _p.strip()
+                    if _p:
+                        _sections_text.append(_p)
+
+                # Se lo split non ha funzionato, metti tutto in sezione 1
+                if len(_sections_text) < 2:
+                    _sections_text = [_raw_text]
+
+                def _highlight_nums(text):
+                    """Evidenzia numeri CTL/ATL/TSB/TSS/FTP inline."""
+                    text = _re.sub(
+                        r'\b(CTL|ATL|TSB|TSS|FTP|VO2max?|W/kg|km/h|bpm)\s*[=:>]?\s*([+\-]?\d+[\.,]?\d*)',
+                        lambda m: f'{m.group(1)} <span class="brief-num">{m.group(2)}</span>',
+                        text
+                    )
+                    return text
+
+                _brief_html = ''
+                for _si, _st in enumerate(_sections_text):
+                    if _si < len(_section_cfg):
+                        _pfx, _ico, _ttl, _bg, _tc = _section_cfg[_si]
+                        # Rimuovi il prefisso numerico
+                        _body = _re.sub(r'^[123]\.\s*', '', _st).strip()
+                        _body = _body.replace('\n', '<br>')
+                        _body = _highlight_nums(_body)
+                        _brief_html += (
+                            f'<div class="brief-section" style="background:{_bg}">'
+                            f'<span class="brief-section-icon">{_ico}</span>'
+                            f'<div class="brief-section-title" style="color:{_tc}">{_ttl}</div>'
+                            f'<div class="brief-section-body">{_body}</div>'
+                            f'</div>'
                         )
                     else:
-                        _formatted += f'<span>{_l}</span><br>'
+                        # Testo extra senza sezione
+                        _brief_html += f'<div style="font-size:13px;color:#64748B;margin-top:4px">{_st}</div>'
 
                 st.markdown(
                     '<div class="mob-card" style="margin-top:8px">'
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
                     '<div class="mob-card-title" style="margin:0">🤖 Briefing Coach</div>'
-                    f'<div style="font-size:10px;color:#94A3B8">{datetime.now().strftime("%d %b %Y")}</div>'
+                    f'<div style="font-size:10px;color:#94A3B8">{datetime.now().strftime("%d %b")}</div>'
                     '</div>'
-                    f'<div class="briefing-card">{_formatted}'
-                    f'<div class="briefing-signature">'
-                    f'<span style="font-size:18px">🏆</span>'
-                    f'<span>Elite Coach AI · generato oggi</span>'
-                    f'</div></div>'
-                    '<div style="margin-top:10px;text-align:right">',
+                    f'{_brief_html}'
+                    '<div style="display:flex;align-items:center;gap:6px;margin-top:8px;'
+                    'padding-top:8px;border-top:1px solid #F1F5F9">'
+                    '<span style="font-size:14px">🏆</span>'
+                    '<span style="font-size:10px;color:#94A3B8">Elite Coach AI</span>'
+                    '<div style="flex:1"></div>',
                     unsafe_allow_html=True)
                 if st.button("🔄 Rigenera", key="regen_brief", use_container_width=False):
                     if _bkey in st.session_state:
@@ -3477,35 +3563,63 @@ elif st.session_state.mob_menu == "chat":
                 """, unsafe_allow_html=True)
 
             quick_prompts = [
-                "💪 Come sto fisicamente?",
-                "🗓️ Cosa fare oggi?",
-                "📋 Piano questa settimana",
-                "📊 Analizza gli ultimi 30gg",
+                ("💪", "Come sto fisicamente?", "CTL, TSB e stato forma"),
+                ("🗓️", "Cosa fare oggi?",        "Sessione consigliata"),
+                ("📋", "Piano questa settimana", "7 giorni strutturati"),
+                ("📊", "Analizza gli ultimi 30gg","Trend e progressi"),
             ]
-            st.markdown('<div class="qp-grid">', unsafe_allow_html=True)
+            _qp_html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 12px 0">'
+            for _qi, (_icon, _title, _sub) in enumerate(quick_prompts):
+                _qp_html += (
+                    f'<div class="qp-card">'
+                    f'<div class="qp-card-icon">{_icon}</div>'
+                    f'<div class="qp-card-title">{_title}</div>'
+                    f'<div class="qp-card-sub">{_sub}</div>'
+                    f'</div>'
+                )
+            _qp_html += '</div>'
+            st.markdown(_qp_html, unsafe_allow_html=True)
+            # Bottoni invisibili sovrapposti per intercettare i click
             qc = st.columns(2)
-            for i, qp in enumerate(quick_prompts):
+            for i, (_icon, _title, _sub) in enumerate(quick_prompts):
                 with qc[i % 2]:
-                    if st.button(qp, use_container_width=True, key=f"qp_{i}", type="secondary"):
-                        clean_qp = qp.split(" ", 1)[1] if qp[0] in "💪🗓📋📊" else qp
-                        st.session_state.messages.append({"role": "user", "content": clean_qp})
+                    if st.button(_title, use_container_width=True, key=f"qp_{i}",
+                                 type="secondary"):
+                        st.session_state.messages.append({"role": "user", "content": _title})
                         st.session_state["_chat_pending"] = True
                         st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
         # ── Messaggi chat ──
+        _user_initials = (athlete.get("firstname","?")[:1] + athlete.get("lastname","?")[:1]).upper() if athlete else "IO"
         st.markdown('<div class="chat-messages-wrap">', unsafe_allow_html=True)
-        for msg in st.session_state.messages:
+        for _mi, msg in enumerate(st.session_state.messages):
+            _ts = datetime.now().strftime("%H:%M")  # approssimazione — non abbiamo ts reale
             if msg["role"] == "user":
+                content = str(msg["content"]).replace("\n", "<br>")
                 st.markdown(
-                    f'<div class="chat-label" style="text-align:right;margin-right:14px">Tu</div>'
-                    f'<div class="chat-user">{msg["content"]}</div>',
+                    f'<div class="chat-row user">'
+                    f'<div class="chat-avatar user-av">{_user_initials}</div>'
+                    f'<div class="chat-bubble-wrap user">'
+                    f'<div class="chat-user">{content}</div>'
+                    f'<div class="chat-ts">{_ts}</div>'
+                    f'</div></div>',
                     unsafe_allow_html=True)
             else:
                 content = str(msg["content"]).replace("\n", "<br>")
+                # Evidenzia numeri con pattern CTL/ATL/TSB/TSS + numero
+                import re as _re
+                content = _re.sub(
+                    r'\b(CTL|ATL|TSB|TSS|FTP|VO2|W/kg|km/h|bpm)[\s=:]+(\d+[\.,]?\d*)',
+                    lambda m: f'{m.group(1)} <span class="brief-num">{m.group(2)}</span>',
+                    content
+                )
                 st.markdown(
-                    f'<div class="chat-label" style="margin-left:14px">🤖 Coach</div>'
-                    f'<div class="chat-ai">{content}</div>',
+                    f'<div class="chat-row">'
+                    f'<div class="chat-avatar coach">🏆</div>'
+                    f'<div class="chat-bubble-wrap">'
+                    f'<div class="chat-ai">{content}</div>'
+                    f'<div class="chat-ts">{_ts}</div>'
+                    f'</div></div>',
                     unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -3514,10 +3628,15 @@ elif st.session_state.mob_menu == "chat":
             last_msg = st.session_state.messages[-1]
             if last_msg["role"] == "user":
                 st.markdown(
-                    '<div class="chat-label" style="margin-left:14px">🤖 Coach</div>'
+                    '<div class="chat-row">'
+                    '<div class="chat-avatar coach">🏆</div>'
+                    '<div class="chat-bubble-wrap">'
                     '<div class="chat-ai" style="padding:12px 16px">'
                     '<div class="typing-dots"><span></span><span></span><span></span></div>'
-                    '</div>', unsafe_allow_html=True)
+                    '</div>'
+                    '<div class="chat-ts">Coach sta elaborando...</div>'
+                    '</div></div>',
+                    unsafe_allow_html=True)
                 _hlines = [
                     ("Atleta" if _m["role"] == "user" else "Coach") + ": " + str(_m["content"])
                     for _m in st.session_state.messages[-12:]
