@@ -1530,6 +1530,7 @@ for key, val in {
     "weekly_plan":        None,
     "weekly_plan_date":   None,
     "_chat_pending":      False,
+    "_nav_open":          False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -1569,108 +1570,96 @@ NAV_ITEMS = [
 
 def render_bottom_nav():
     """
-    Nav bar con bottoni Streamlit nativi — non perde la sessione.
-    CSS li forza orizzontali, compatti, fissi in basso sopra le icone Streamlit.
+    FAB hamburger menu — un singolo pulsante fisso in basso a sinistra.
+    Cliccato apre/chiude un menu con le 5 voci. Usa solo st.button → no session reset.
     """
     cur = st.session_state.mob_menu
+    _open = st.session_state.get("_nav_open", False)
 
-    # CSS iniettato ogni volta (semplice, nessun guard)
+    # CSS per il FAB e il menu espandibile
     st.markdown("""
 <style>
-/* Wrapper della nav — identificato dal data-testid del container padre */
-div[data-testid="stBottom"] {
+/* FAB button container */
+#fab-anchor + div [data-testid="stButton"]:last-child {
     position: fixed !important;
-    bottom: 50px !important;
-    left: 8px !important;
-    right: 8px !important;
+    bottom: 20px !important;
+    left: 16px !important;
     z-index: 99999 !important;
-    background: #fff !important;
-    border: 1.5px solid #e8e8e8 !important;
-    border-radius: 16px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
-    padding: 4px 6px !important;
-}
-/* Forza la riga di colonne orizzontale e compatta */
-div[data-testid="stBottom"] [data-testid="stHorizontalBlock"] {
-    gap: 2px !important;
-    flex-wrap: nowrap !important;
-}
-div[data-testid="stBottom"] [data-testid="stHorizontalBlock"] > div {
-    padding: 0 !important;
-    min-width: 0 !important;
-    flex: 1 !important;
-}
-/* Bottoni: quadrati piccoli con solo emoji */
-div[data-testid="stBottom"] button {
-    height: 44px !important;
-    min-height: 44px !important;
-    padding: 0 !important;
-    font-size: 22px !important;
-    border-radius: 12px !important;
-    border: none !important;
-    width: 100% !important;
-    line-height: 1 !important;
-}
-div[data-testid="stBottom"] button[kind="secondary"] {
-    background: #f8f8f8 !important;
-    color: #555 !important;
-}
-div[data-testid="stBottom"] button[kind="primary"] {
-    background: #E3F2FD !important;
-    color: #1565C0 !important;
-}
-/* Fallback: se stBottom non disponibile, usa l'ancora */
-#nav-row-anchor + div [data-testid="stHorizontalBlock"] {
-    position: fixed !important;
-    bottom: 50px !important;
-    left: 8px !important;
-    right: 8px !important;
-    z-index: 99999 !important;
-    background: #fff !important;
-    border: 1.5px solid #e8e8e8 !important;
-    border-radius: 16px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
-    padding: 4px 6px !important;
-    gap: 2px !important;
-    flex-wrap: nowrap !important;
+    width: 52px !important;
+    height: 52px !important;
     margin: 0 !important;
-}
-#nav-row-anchor + div [data-testid="stHorizontalBlock"] > div {
     padding: 0 !important;
-    flex: 1 !important;
-    min-width: 0 !important;
 }
-#nav-row-anchor + div [data-testid="stHorizontalBlock"] button {
-    height: 44px !important;
-    min-height: 44px !important;
-    padding: 0 !important;
+#fab-anchor + div [data-testid="stButton"]:last-child button {
+    width: 52px !important;
+    height: 52px !important;
+    min-height: 52px !important;
+    border-radius: 50% !important;
     font-size: 22px !important;
-    border-radius: 12px !important;
+    padding: 0 !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.20) !important;
     border: none !important;
-    width: 100% !important;
-    line-height: 1 !important;
+    background: #1565C0 !important;
+    color: #fff !important;
 }
-#nav-row-anchor + div [data-testid="stHorizontalBlock"] button[kind="secondary"] {
-    background: #f8f8f8 !important;
-    color: #555 !important;
+/* Menu espandibile sopra il FAB */
+.fab-menu {
+    position: fixed !important;
+    bottom: 82px !important;
+    left: 10px !important;
+    z-index: 99998 !important;
+    background: #ffffff !important;
+    border: 1.5px solid #e0e0e0 !important;
+    border-radius: 14px !important;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.15) !important;
+    padding: 6px !important;
+    min-width: 160px !important;
 }
-#nav-row-anchor + div [data-testid="stHorizontalBlock"] button[kind="primary"] {
-    background: #E3F2FD !important;
-    color: #1565C0 !important;
+.fab-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1a1a;
+    cursor: pointer;
 }
+.fab-menu-item.active {
+    background: #E3F2FD;
+    color: #1565C0;
+}
+.fab-menu-item:not(.active):hover {
+    background: #f5f5f5;
+}
+.fab-menu-icon { font-size: 18px; }
 </style>
 """, unsafe_allow_html=True)
 
-    st.markdown('<div id="nav-row-anchor"></div>', unsafe_allow_html=True)
-    cols = st.columns(5)
-    for i, (key, icon, label) in enumerate(NAV_ITEMS):
-        with cols[i]:
-            _t = "primary" if cur == key else "secondary"
-            if st.button(icon, key=f"nav_btn_{key}",
-                         use_container_width=True, type=_t, help=label):
+    # Menu espandibile (solo se aperto) — SOPRA il FAB, bottoni Streamlit reali
+    if _open:
+        st.markdown('<div class="fab-menu">', unsafe_allow_html=True)
+        for key, icon, label in NAV_ITEMS:
+            _active_cls = "active" if cur == key else ""
+            st.markdown(
+                f'<div class="fab-menu-item {_active_cls}">'
+                f'<span class="fab-menu-icon">{icon}</span>{label}</div>',
+                unsafe_allow_html=True)
+            if st.button(f"{icon} {label}", key=f"nav_item_{key}",
+                         use_container_width=True):
                 st.session_state.mob_menu = key
                 st.session_state.selected_act_id = None
+                st.session_state["_nav_open"] = False
                 st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # FAB button — ancora + bottone fisso
+    st.markdown('<div id="fab-anchor"></div>', unsafe_allow_html=True)
+    _fab_icon = "✕" if _open else "☰"
+    if st.button(_fab_icon, key="fab_nav_toggle"):
+        st.session_state["_nav_open"] = not _open
+        st.rerun()
 
 
 def get_act_micro_comment(row_data, metrics, sport_info) -> str:
@@ -1684,16 +1673,12 @@ def get_act_micro_comment(row_data, metrics, sport_info) -> str:
     m = metrics
     s = sport_info
 
-    # Raccoglie tutti i dati disponibili per il commento
+    # Raccoglie dati specifici — priorità a quelli meno ovvi
     _name      = str(row_data.get("name", ""))
     _type      = s["label"]
-    _dist      = m["dist_str"]
-    _dur       = m["dur_str"]
-    _elev      = m["elev"]
     _hr_avg    = m["hr_avg"]
     _hr_max    = m["hr_max"]
     _pace      = m["pace_str"]
-    _cals      = m["cals"]
     _watts_avg = row_data.get("average_watts")
     _watts_max = row_data.get("max_watts")
     _speed_max = row_data.get("max_speed")  # m/s
@@ -1701,34 +1686,38 @@ def get_act_micro_comment(row_data, metrics, sport_info) -> str:
     _suffer    = row_data.get("suffer_score")
     _tss       = f"{row_data.get('tss', 0):.0f}"
 
-    # Costruisce lista dati significativi da includere nel prompt
-    _extra = []
-    if pd.notna(_watts_avg) and _watts_avg and _watts_avg > 0:
-        _extra.append(f"potenza media {_watts_avg:.0f}W")
-    if pd.notna(_watts_max) and _watts_max and _watts_max > 0:
-        _extra.append(f"picco potenza {_watts_max:.0f}W")
-    if pd.notna(_speed_max) and _speed_max and _speed_max > 0:
+    # Costruisce lista dati — NON include dislivello (troppo ripetitivo)
+    _facts = []
+    if pd.notna(_watts_max) and _watts_max and float(_watts_max) > 0:
+        _facts.append(f"picco potenza {float(_watts_max):.0f}W")
+    if pd.notna(_watts_avg) and _watts_avg and float(_watts_avg) > 0:
+        _facts.append(f"potenza media {float(_watts_avg):.0f}W")
+    if pd.notna(_speed_max) and _speed_max and float(_speed_max) > 0:
         _kmh_max = float(_speed_max) * 3.6
-        _extra.append(f"velocità max {_kmh_max:.0f} km/h")
+        if _kmh_max > 45:  # solo se notevole
+            _facts.append(f"max {_kmh_max:.0f} km/h")
     if pd.notna(_hr_max) and _hr_max != "—":
-        _extra.append(f"FC max {_hr_max} bpm")
-    if pd.notna(_suffer) and _suffer and float(_suffer) > 0:
-        _extra.append(f"suffer score {_suffer:.0f}")
-    if pd.notna(_cadence) and _cadence and _cadence > 0:
-        _extra.append(f"cadenza {_cadence:.0f} rpm")
-    _extra_str = ", ".join(_extra) if _extra else ""
+        _facts.append(f"FC max {_hr_max} bpm")
+    if pd.notna(_suffer) and _suffer and float(_suffer) > 60:
+        _facts.append(f"suffer {_suffer:.0f}")
+    if pd.notna(_cadence) and _cadence and float(_cadence) > 0:
+        _facts.append(f"cadenza {float(_cadence):.0f}")
+    _facts_str = ", ".join(_facts[:2]) if _facts else ""  # max 2 dati
 
     _prompt = (
-        f"Attività Strava: {_type}, nome='{_name}', {_dist}, {_dur}, "
-        f"D+{_elev}, FC media {_hr_avg} bpm, {_pace}, TSS {_tss}"
-        + (f", {_extra_str}" if _extra_str else "") + ".\n"
-        "Scrivi UNA frase brevissima (5-8 parole) SPECIFICA su questa sessione.\n"
-        "Regole:\n"
-        "- Se il nome contiene un luogo geografico (monte, passo, vallata, paese), usalo.\n"
-        "- Se c'è un dato numerico notevole (picco velocità, potenza, FC max alta, dislivello elevato), citalo.\n"
-        "- Se nessun dato spicca, descrivi il tipo di sforzo (Z2 lungo, ritmo soglia, recupero, ecc).\n"
-        "- MAI scrivere frasi generiche come 'buona uscita' o 'allenamento completato'.\n"
-        "- Risposta: SOLO la frase, niente punteggiatura finale, niente virgolette."
+        f"Sport: {_type}. Nome attività: '{_name}'. "
+        f"Durata: {m['dur_str']}, distanza: {m['dist_str']}, passo/velocità: {_pace}, "
+        f"FC media: {_hr_avg} bpm, dislivello: {m['elev']}, TSS: {_tss}"
+        + (f". Dati extra: {_facts_str}" if _facts_str else "") + ".\n\n"
+        "Scrivi UNA frase brevissima (5-8 parole) SPECIFICA su questa uscita.\n"
+        "Scegli IL DATO PIÙ INTERESSANTE tra quelli disponibili — può essere qualsiasi cosa:\n"
+        "- Luogo geografico nel nome (monte, passo, vallata) → usalo\n"
+        "- Picco potenza o velocità massima notevole → citalo\n"
+        "- Dislivello elevato (es. >1500m) → citalo\n"
+        "- FC media alta o bassa rispetto alla durata → commentalo\n"
+        "- Tipo di sforzo (Z2 lungo, soglia, recupero, interval) → descrivilo\n"
+        "Non citare sempre lo stesso tipo di dato. Varia in base a cosa spicca davvero.\n"
+        "Solo la frase, niente punteggiatura finale."
     )
     try:
         _res = ai_generate(_prompt, max_tokens=40)
