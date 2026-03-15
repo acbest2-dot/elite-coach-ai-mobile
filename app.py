@@ -200,8 +200,11 @@ if not st.session_state.get("_css_injected"):
       border-radius: 14px;
       padding: 14px 16px;
       margin: 8px 12px 0;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.07);
       border-left: 4px solid #ccc;
+      border-top: 1px solid #e8e8e8;
+      border-right: 1px solid #e8e8e8;
+      border-bottom: 1px solid #e8e8e8;
   }
 
   /* Bottone dettaglio cucito sotto la card */
@@ -224,7 +227,45 @@ if not st.session_state.get("_css_injected"):
   }
   .act-card + div[data-testid="stButton"] > button:hover {
       background: #E3F2FD !important;
-  }  .act-title {
+  }
+
+  /* Wrapper card + bottone piccolo */
+  .act-card-wrap { margin: 8px 12px 0; }
+  .act-card-wrap .act-card { margin: 0 !important; }
+
+  /* Riga bottone 🔍 — sotto la card, allineata a destra */
+  .act-card-wrap > div[data-testid="stHorizontalBlock"] {
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #fff !important;
+      border: 1px solid #e8e8e8 !important;
+      border-top: none !important;
+      border-radius: 0 0 14px 14px !important;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.06) !important;
+  }
+  /* Colonna vuota sinistra */
+  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:first-child {
+      padding: 0 !important;
+  }
+  /* Colonna bottone destra */
+  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:last-child {
+      padding: 2px 8px 4px !important;
+  }
+  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:last-child button {
+      min-height: 32px !important;
+      height: 32px !important;
+      font-size: 16px !important;
+      border-radius: 8px !important;
+      padding: 0 !important;
+      background: #E3F2FD !important;
+      color: #1565C0 !important;
+      border: none !important;
+  }
+  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:last-child button:hover {
+      background: #BBDEFB !important;
+  }
+
+  .act-title {
       font-size: 15px;
       font-weight: 700;
       color: #1a1a1a;
@@ -1550,12 +1591,65 @@ NAV_ITEMS = [
 
 def render_bottom_nav():
     """
-    Bottom nav — SOLO bottoni Streamlit nativi, solo icone, fissi in basso.
-    Nessun HTML decorativo duplicato. CSS li posiziona come fixed.
+    Bottom nav — bottoni orizzontali compatti fissi in basso.
+    Approccio: CSS aggressivo che schiaccia la riga di colonne Streamlit.
     """
     cur = st.session_state.mob_menu
 
-    # Bottoni reali — icona come label, help come tooltip
+    # Inietta il CSS una sola volta per sessione
+    if not st.session_state.get("_nav_css_injected"):
+        st.session_state["_nav_css_injected"] = True
+        st.markdown("""<style>
+/* ── NAV BAR FISSA ──────────────────────────────── */
+#nav-anchor + div [data-testid="stHorizontalBlock"] {
+    position: fixed !important;
+    bottom: 0 !important; left: 0 !important; right: 0 !important;
+    z-index: 9999 !important;
+    background: #fff !important;
+    border-top: 1.5px solid #e8e8e8 !important;
+    box-shadow: 0 -2px 16px rgba(0,0,0,0.08) !important;
+    padding: 4px 4px 8px !important;
+    margin: 0 !important;
+    flex-direction: row !important;
+    gap: 2px !important;
+}
+#nav-anchor + div [data-testid="stHorizontalBlock"] > div {
+    padding: 0 !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+}
+#nav-anchor + div [data-testid="stHorizontalBlock"] button {
+    height: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+    font-size: 20px !important;
+    padding: 0 !important;
+    border-radius: 10px !important;
+    border: none !important;
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+}
+#nav-anchor + div [data-testid="stHorizontalBlock"] button p {
+    font-size: 20px !important;
+    margin: 0 !important;
+    line-height: 1 !important;
+}
+#nav-anchor + div [data-testid="stHorizontalBlock"] button[kind="secondary"] {
+    background: #f8f8f8 !important; color: #555 !important;
+}
+#nav-anchor + div [data-testid="stHorizontalBlock"] button[kind="primary"] {
+    background: #E3F2FD !important; color: #1565C0 !important;
+}
+</style>""", unsafe_allow_html=True)
+
+    # Ancora HTML — il CSS sopra seleziona il blocco colonne immediatamente dopo
+    st.markdown('<div id="nav-anchor"></div>', unsafe_allow_html=True)
+
     _cols = st.columns(5)
     for i, (key, icon, label) in enumerate(NAV_ITEMS):
         with _cols[i]:
@@ -1565,57 +1659,6 @@ def render_bottom_nav():
                 st.session_state.mob_menu = key
                 st.session_state.selected_act_id = None
                 st.rerun()
-
-    # CSS: rende questa specifica riga di 5 bottoni fissa in basso
-    # Usiamo :has() per identificarla in modo affidabile per chiave
-    st.markdown("""
-    <style>
-    /* Seleziona il contenitore che ha esattamente i 5 bottoni nav */
-    [data-testid="stHorizontalBlock"]:has(
-        button[kind="secondary"][aria-label="Storico"],
-        button[kind="primary"][aria-label="Storico"]
-    ) {
-        position: fixed !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        z-index: 9999 !important;
-        background: #ffffff !important;
-        border-top: 2px solid #f0f0f0 !important;
-        box-shadow: 0 -3px 20px rgba(0,0,0,0.09) !important;
-        padding: 6px 6px 10px !important;
-        margin: 0 !important;
-        gap: 4px !important;
-    }
-    [data-testid="stHorizontalBlock"]:has(
-        button[aria-label="Storico"]
-    ) > div {
-        padding: 0 !important;
-    }
-    [data-testid="stHorizontalBlock"]:has(
-        button[aria-label="Storico"]
-    ) button {
-        min-height: 48px !important;
-        height: 48px !important;
-        font-size: 22px !important;
-        border-radius: 12px !important;
-        border: none !important;
-        padding: 4px !important;
-    }
-    [data-testid="stHorizontalBlock"]:has(
-        button[aria-label="Storico"]
-    ) button[kind="secondary"] {
-        background: #f8f8f8 !important;
-        color: #555 !important;
-    }
-    [data-testid="stHorizontalBlock"]:has(
-        button[aria-label="Storico"]
-    ) button[kind="primary"] {
-        background: #E3F2FD !important;
-        color: #1565C0 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
 # ============================================================
 # LOGIN PAGE
@@ -2465,10 +2508,12 @@ if st.session_state.mob_menu == "dashboard":
             f'<div class="act-pills" style="margin-top:6px">{_pills}</div>'
             f'</div>',
             unsafe_allow_html=True)
-        # Pulsante 🔍 visibile cucito sotto la card
-        if st.button("🔍  Apri dettaglio", key=f"dash5_{_id5}", use_container_width=True):
-            st.session_state.selected_act_id = _id5
-            st.rerun()
+        # Pulsante quadrato piccolo a destra
+        _bc1, _bc2 = st.columns([5, 1])
+        with _bc2:
+            if st.button("🔍", key=f"dash5_{_id5}", help="Apri dettaglio"):
+                st.session_state.selected_act_id = _id5
+                st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Solo prima attività: mappa + AI
@@ -2886,9 +2931,11 @@ elif st.session_state.mob_menu == "storico":
                     f'<div class="act-pills" style="margin-top:6px">{_pills_s}</div>'
                     f'</div>',
                     unsafe_allow_html=True)
-                if st.button("🔍  Apri dettaglio", key=f"cal_det_{_id}", use_container_width=True):
-                    st.session_state.selected_act_id = _id
-                    st.rerun()
+                _sc1, _sc2 = st.columns([5, 1])
+                with _sc2:
+                    if st.button("🔍", key=f"cal_det_{_id}", help="Apri dettaglio"):
+                        st.session_state.selected_act_id = _id
+                        st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================
