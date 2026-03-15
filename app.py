@@ -3464,7 +3464,7 @@ elif st.session_state.mob_menu == "chat":
     @keyframes bounce { 0%,80%,100%{transform:scale(0.7);opacity:0.5} 40%{transform:scale(1);opacity:1} }
     .qp-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px 12px 0; }
     div[data-testid="stChatInput"] {
-        position:sticky !important; bottom:115px !important;
+        position:sticky !important; bottom:150px !important;
         background:#f0f2f6 !important; padding:8px 0 4px !important; z-index:998 !important;
     }
     /* Piano strutturato */
