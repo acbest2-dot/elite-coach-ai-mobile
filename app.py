@@ -1570,19 +1570,25 @@ NAV_ITEMS = [
 
 def render_bottom_nav():
     """
-    Nav bar fissa in ALTO — icone piccole orizzontali sempre visibili.
-    HTML decorativo fisso + bottoni Streamlit invisibili sovrapposti per i click.
+    Nav bar fissa in alto. Approccio definitivo:
+    1. HTML decorativo fisso con le icone (pointer-events:none)
+    2. I bottoni Streamlit vengono spostati fisicamente DENTRO la nav via JS
+    3. I bottoni diventano trasparenti ma cliccabili — le icone HTML restano visibili sotto
     """
     cur = st.session_state.mob_menu
 
-    # ── HTML decorativo fissato in alto ──
+    # Icone e label per JS (usate per identificare i bottoni e aggiornare la nav)
+    _active_icons = {key: icon for key, icon, _ in NAV_ITEMS}
+
+    # HTML nav decorativa
     _items_html = ""
     for key, icon, label in NAV_ITEMS:
         _bg  = "background:#E3F2FD;" if cur == key else ""
         _col = "color:#1565C0;" if cur == key else "color:#666;"
         _items_html += (
-            f'<div style="flex:1;display:flex;flex-direction:column;align-items:center;'
-            f'justify-content:center;padding:4px 2px;border-radius:8px;{_bg}">'
+            f'<div class="nav-slot" data-key="{key}" '
+            f'style="flex:1;display:flex;flex-direction:column;align-items:center;'
+            f'justify-content:center;padding:4px 2px;border-radius:8px;{_bg};pointer-events:none">'
             f'<span style="font-size:18px;line-height:1">{icon}</span>'
             f'<span style="font-size:9px;font-weight:600;margin-top:1px;{_col}">{label}</span>'
             f'</div>'
@@ -1590,7 +1596,6 @@ def render_bottom_nav():
 
     st.markdown(f"""
 <style>
-/* Barra nav decorativa fissa in alto */
 .top-nav-bar {{
     position: fixed;
     top: 0; left: 0; right: 0;
@@ -1599,53 +1604,78 @@ def render_bottom_nav():
     border-bottom: 1px solid #e8e8e8;
     box-shadow: 0 1px 8px rgba(0,0,0,0.07);
     display: flex;
-    align-items: center;
-    z-index: 99999;
-    padding: 2px 4px;
-    pointer-events: none;
+    align-items: stretch;
+    z-index: 99998;
+    padding: 3px 4px;
 }}
-/* Sposta il contenuto sotto la nav */
 .block-container {{
     padding-top: 60px !important;
     padding-bottom: 20px !important;
 }}
-/* Bottoni Streamlit sovrapposti alla nav — invisibili ma cliccabili */
-#nav-btns-anchor + div {{
-    position: fixed !important;
-    top: 0 !important; left: 0 !important; right: 0 !important;
-    height: 52px !important;
-    z-index: 100000 !important;
-    background: transparent !important;
-    padding: 2px 4px !important;
-    margin: 0 !important;
-    display: flex !important;
-}}
-#nav-btns-anchor + div > div[data-testid="stHorizontalBlock"] {{
-    width: 100% !important;
-    gap: 2px !important;
-    flex-wrap: nowrap !important;
-    background: transparent !important;
-}}
-#nav-btns-anchor + div > div[data-testid="stHorizontalBlock"] > div {{
-    padding: 0 !important;
-    flex: 1 !important;
-    min-width: 0 !important;
-}}
-#nav-btns-anchor + div > div[data-testid="stHorizontalBlock"] button {{
+/* I bottoni spostati dentro la nav */
+.top-nav-bar button.nav-real-btn {{
+    position: absolute !important;
+    top: 0 !important; bottom: 0 !important;
     opacity: 0 !important;
-    height: 48px !important;
-    min-height: 48px !important;
-    width: 100% !important;
     border: none !important;
     background: transparent !important;
     cursor: pointer !important;
+    z-index: 99999 !important;
+    padding: 0 !important;
+    min-height: unset !important;
 }}
 </style>
-<div class="top-nav-bar">{_items_html}</div>
+<div class="top-nav-bar" id="top-nav-bar">{_items_html}</div>
+<script>
+(function() {{
+  function moveNavButtons() {{
+    var nav = document.getElementById('top-nav-bar');
+    if (!nav) return;
+    var slots = nav.querySelectorAll('.nav-slot');
+    if (slots.length !== 5) return;
+    
+    // Cerca i bottoni Streamlit con le label delle sezioni
+    var labels = ['Home','Fitness','Storico','Coach','Profilo'];
+    var allBtns = Array.from(document.querySelectorAll('button'));
+    var navBtns = allBtns.filter(function(b) {{
+      return labels.includes(b.innerText.trim());
+    }});
+    
+    if (navBtns.length !== 5) return;
+    
+    // Calcola posizione di ogni slot e sovrapponi il bottone
+    var navRect = nav.getBoundingClientRect();
+    navBtns.forEach(function(btn, i) {{
+      var slot = slots[i];
+      if (!slot) return;
+      var slotRect = slot.getBoundingClientRect();
+      btn.classList.add('nav-real-btn');
+      btn.style.position = 'fixed';
+      btn.style.top = slotRect.top + 'px';
+      btn.style.left = slotRect.left + 'px';
+      btn.style.width = slotRect.width + 'px';
+      btn.style.height = slotRect.height + 'px';
+      btn.style.opacity = '0';
+      btn.style.zIndex = '99999';
+      btn.style.cursor = 'pointer';
+      btn.style.border = 'none';
+      btn.style.background = 'transparent';
+      btn.style.minHeight = 'unset';
+      btn.style.padding = '0';
+    }});
+  }}
+  
+  // Esegui subito e ogni volta che il DOM cambia
+  moveNavButtons();
+  var obs = new MutationObserver(moveNavButtons);
+  obs.observe(document.body, {{childList: true, subtree: true}});
+  // Anche su resize
+  window.addEventListener('resize', moveNavButtons);
+}})();
+</script>
 """, unsafe_allow_html=True)
 
-    # Bottoni Streamlit reali — trasparenti, sovrapposti alla nav decorativa
-    st.markdown('<div id="nav-btns-anchor"></div>', unsafe_allow_html=True)
+    # Bottoni Streamlit — messi nel DOM normale, il JS li sposta sopra la nav
     _cols = st.columns(5)
     for i, (key, icon, label) in enumerate(NAV_ITEMS):
         with _cols[i]:
