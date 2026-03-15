@@ -1580,29 +1580,36 @@ def render_bottom_nav():
 
     st.markdown("""
 <style>
-/* Compatta il radio nav */
+/* Nascondi i pallini radio */
+div[data-testid="stRadio"] input[type="radio"] {
+    display: none !important;
+}
 div[data-testid="stRadio"] > div {
-    gap: 2px !important;
+    gap: 4px !important;
     flex-wrap: nowrap !important;
 }
 div[data-testid="stRadio"] label {
     flex: 1 !important;
     justify-content: center !important;
-    font-size: 22px !important;
+    font-size: 24px !important;
     padding: 6px 2px !important;
     border-radius: 10px !important;
     min-width: 0 !important;
     border: none !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
 }
 div[data-testid="stRadio"] label:has(input:checked) {
     background: #E3F2FD !important;
-    color: #1565C0 !important;
 }
 div[data-testid="stRadio"] label span[data-testid="stMarkdownContainer"] p {
-    font-size: 22px !important;
+    font-size: 24px !important;
     line-height: 1 !important;
+    margin: 0 !important;
 }
-div[data-testid="stRadio"] > label { display: none; }
+/* Nascondi label del radio widget */
+div[data-testid="stRadio"] > label { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
