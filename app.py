@@ -907,7 +907,7 @@ def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0,
   .mapboxgl-ctrl-group{{background:rgba(0,0,0,0.5)!important;border:none!important}}
   .mapboxgl-ctrl-group button{{background:rgba(255,255,255,0.12)!important;color:#fff!important}}
 
-  /* Pannello controlli in basso a sinistra */
+  /* Pannello controlli layer + pitch — in basso a sinistra */
   #ctrl-panel{{
     position:absolute;bottom:12px;left:12px;z-index:10;
     display:flex;flex-direction:column;gap:6px;
@@ -920,6 +920,31 @@ def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0,
   }}
   .ctrl-btn:hover,.ctrl-btn.active{{background:rgba(21,101,192,0.85);border-color:#42A5F5}}
   .ctrl-btn.sm{{padding:5px 8px;font-size:11px}}
+
+  /* Bottone ✕ fullscreen — grande, in alto a destra, sempre visibile */
+  #fs-btn{{
+    position:absolute;top:12px;right:12px;z-index:20;
+    background:rgba(0,0,0,0.7);color:#fff;
+    border:2px solid rgba(255,255,255,0.4);
+    border-radius:12px;padding:10px 18px;
+    font-size:18px;font-weight:800;
+    cursor:pointer;backdrop-filter:blur(8px);
+    transition:background 0.15s;
+    display:none;
+  }}
+  body.is-fullscreen #fs-btn{{display:block}}
+  #fs-btn:hover{{background:rgba(198,40,40,0.85);border-color:#ef9a9a}}
+
+  /* Bottone ⛶ entra fullscreen — piccolo, in alto a destra */
+  #enter-fs-btn{{
+    position:absolute;top:12px;right:12px;z-index:20;
+    background:rgba(0,0,0,0.60);color:#fff;
+    border:1px solid rgba(255,255,255,0.25);
+    border-radius:10px;padding:7px 13px;font-size:14px;font-weight:700;
+    cursor:pointer;backdrop-filter:blur(6px);transition:background 0.15s;
+  }}
+  body.is-fullscreen #enter-fs-btn{{display:none}}
+  #enter-fs-btn:hover{{background:rgba(21,101,192,0.8)}}
 
   /* Stats overlay in alto a sinistra */
   #stats-overlay{{
@@ -938,30 +963,32 @@ def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0,
 </style></head><body>
 <div id="map"></div>
 
-<!-- Stats overlay -->
+<!-- Stats overlay top-left -->
 <div id="stats-overlay">
   {'<b>📏</b> ' + _dist_str + '<br>' if _dist_str else ''}{'<b>⛰</b> ' + _elev_str + '<br>' if _elev_str else ''}{'<b>⏱</b> ' + dur_str if dur_str else ''}
 </div>
 
-<!-- Pannello controlli -->
+<!-- Bottone entra fullscreen (visibile quando NON siamo in FS) -->
+<button id="enter-fs-btn" onclick="toggleFS()">⛶ Schermo intero</button>
+
+<!-- Bottone ESCI fullscreen (visibile solo quando siamo in FS) -->
+<button id="fs-btn" onclick="toggleFS()">✕ Esci</button>
+
+<!-- Pannello controlli: layer + pitch + stats -->
 <div id="ctrl-panel">
-  <!-- Riga 1: Layer switcher -->
+  <!-- Layer switcher -->
   <div class="ctrl-row">
     <button class="ctrl-btn sm active" id="l-sat"   onclick="setLayer('satellite-streets-v12','l-sat')">🛰 Satellite</button>
     <button class="ctrl-btn sm"        id="l-out"   onclick="setLayer('outdoors-v12','l-out')">🗺 Topo</button>
     <button class="ctrl-btn sm"        id="l-dark"  onclick="setLayer('dark-v11','l-dark')">🌑 Dark</button>
     <button class="ctrl-btn sm"        id="l-str"   onclick="setLayer('streets-v12','l-str')">🏙 Street</button>
   </div>
-  <!-- Riga 2: Pitch + fly-to + stats + fullscreen -->
+  <!-- Pitch + stats -->
   <div class="ctrl-row">
     <button class="ctrl-btn sm" onclick="setPitch(0)"  title="Vista piatta">📐 0°</button>
     <button class="ctrl-btn sm" onclick="setPitch(45)" title="Vista 45°">🏔 45°</button>
     <button class="ctrl-btn sm" onclick="setPitch(70)" title="Vista immersiva">🎮 70°</button>
-    <button class="ctrl-btn sm" onclick="flyTo({start_j},'🟢')" title="Vai a partenza">🟢</button>
-    <button class="ctrl-btn sm" onclick="flyTo({end_j},'🔴')"   title="Vai ad arrivo">🔴</button>
-    <button class="ctrl-btn sm" onclick="fitRoute()"             title="Traccia intera">↔</button>
-    <button class="ctrl-btn sm" onclick="toggleStats()"          title="Statistiche">📊</button>
-    <button class="ctrl-btn sm" onclick="toggleFS()"  id="fs-btn">⛶</button>
+    <button class="ctrl-btn sm" onclick="toggleStats()" title="Statistiche">📊 Stats</button>
   </div>
 </div>
 
@@ -1016,30 +1043,20 @@ function setLayer(styleId, btnId){{
 // Pitch control
 function setPitch(p){{map.easeTo({{pitch:p,duration:400}});}}
 
-// Fly-to
-function flyTo(lngLat, label){{map.flyTo({{center:lngLat,zoom:15,pitch:60,duration:1200}});}}
-
-// Fit route
-function fitRoute(){{map.fitBounds(bounds,{{padding:50,duration:800,pitch:55}});}}
-
 // Stats toggle
 function toggleStats(){{
-  var el=document.getElementById('stats-overlay');
-  el.classList.toggle('visible');
+  document.getElementById('stats-overlay').classList.toggle('visible');
 }}
 
 // Fullscreen
 var _isFS=false;
 function toggleFS(){{
   _isFS=!_isFS;
-  var btn=document.getElementById('fs-btn');
   if(_isFS){{
     document.body.classList.add('is-fullscreen');
-    btn.textContent='✕';
     if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
   }} else {{
     document.body.classList.remove('is-fullscreen');
-    btn.textContent='⛶';
     if(document.exitFullscreen) document.exitFullscreen();
   }}
   setTimeout(()=>map.resize(),200);
@@ -1048,7 +1065,6 @@ document.addEventListener('fullscreenchange',()=>{{
   if(!document.fullscreenElement && _isFS){{
     _isFS=false;
     document.body.classList.remove('is-fullscreen');
-    document.getElementById('fs-btn').textContent='⛶';
     setTimeout(()=>map.resize(),200);
   }}
 }});
@@ -1534,97 +1550,69 @@ NAV_ITEMS = [
 
 def render_bottom_nav():
     """
-    Bottom nav fissa — solo icone, niente testo. Una sola chiamata in tutta l'app.
-    CSS position:fixed mantiene la barra visibile indipendentemente dallo scroll.
+    Bottom nav — SOLO bottoni Streamlit nativi, solo icone, fissi in basso.
+    Nessun HTML decorativo duplicato. CSS li posiziona come fixed.
     """
     cur = st.session_state.mob_menu
 
-    # CSS — iniettato solo se non già presente
-    if not st.session_state.get("_nav_css_injected"):
-        st.session_state["_nav_css_injected"] = True
-        st.markdown("""
-        <style>
-        /* Nav bar fissa in fondo */
-        .nav-bar-fixed {
-            position: fixed !important;
-            bottom: 0 !important; left: 0 !important; right: 0 !important;
-            z-index: 9999 !important;
-            background: #ffffff !important;
-            border-top: 1px solid #e8e8e8 !important;
-            box-shadow: 0 -2px 20px rgba(0,0,0,0.10) !important;
-            display: flex !important;
-            padding: 6px 8px 10px !important;
-            gap: 6px !important;
-        }
-        .nav-item-btn {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 6px 4px;
-            border-radius: 12px;
-            cursor: pointer;
-            border: none;
-            background: transparent;
-            font-size: 22px;
-            line-height: 1;
-            transition: background 0.15s;
-        }
-        .nav-item-btn.active {
-            background: #E3F2FD;
-        }
-        .nav-item-btn:hover { background: #f0f0f0; }
-        </style>
-        """, unsafe_allow_html=True)
-
-    # HTML decorativo fisso (solo visivo)
-    _items_html = ""
-    for key, icon, label in NAV_ITEMS:
-        _cls = "nav-item-btn active" if cur == key else "nav-item-btn"
-        _items_html += f'<div class="{_cls}" title="{label}">{icon}</div>'
-    st.markdown(f'<div class="nav-bar-fixed">{_items_html}</div>', unsafe_allow_html=True)
-
-    # Bottoni Streamlit trasparenti sovrapposti — unici elementi cliccabili
-    # Usiamo una riga di bottoni nascosti con CSS che li posiziona sopra la nav decorativa
+    # Bottoni reali — icona come label, help come tooltip
     _cols = st.columns(5)
     for i, (key, icon, label) in enumerate(NAV_ITEMS):
         with _cols[i]:
             _t = "primary" if cur == key else "secondary"
-            if st.button(icon, key=f"nav_btn_{key}", use_container_width=True, type=_t,
-                         help=label):
+            if st.button(icon, key=f"nav_btn_{key}", use_container_width=True,
+                         type=_t, help=label):
                 st.session_state.mob_menu = key
                 st.session_state.selected_act_id = None
                 st.rerun()
 
-    # CSS per rendere i bottoni Streamlit trasparenti e sovrapposti alla nav decorativa
+    # CSS: rende questa specifica riga di 5 bottoni fissa in basso
+    # Usiamo :has() per identificarla in modo affidabile per chiave
     st.markdown("""
     <style>
-    /* Identifica la riga nav — deve essere l'ultimo stHorizontalBlock */
-    [data-testid="stHorizontalBlock"]:has(button[data-testid="baseButton-secondary"][title="Fitness"],
-                                          button[data-testid="baseButton-primary"][title="Fitness"],
-                                          button[data-testid="baseButton-secondary"][title="Home"],
-                                          button[data-testid="baseButton-primary"][title="Home"]) {
+    /* Seleziona il contenitore che ha esattamente i 5 bottoni nav */
+    [data-testid="stHorizontalBlock"]:has(
+        button[kind="secondary"][aria-label="Storico"],
+        button[kind="primary"][aria-label="Storico"]
+    ) {
         position: fixed !important;
-        bottom: 0 !important; left: 0 !important; right: 0 !important;
-        z-index: 10000 !important;
-        background: transparent !important;
-        padding: 6px 8px 10px !important;
-        gap: 6px !important;
-        pointer-events: none !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 9999 !important;
+        background: #ffffff !important;
+        border-top: 2px solid #f0f0f0 !important;
+        box-shadow: 0 -3px 20px rgba(0,0,0,0.09) !important;
+        padding: 6px 6px 10px !important;
+        margin: 0 !important;
+        gap: 4px !important;
     }
-    [data-testid="stHorizontalBlock"]:has(button[title="Fitness"]) > div,
-    [data-testid="stHorizontalBlock"]:has(button[title="Home"]) > div {
-        pointer-events: all !important;
+    [data-testid="stHorizontalBlock"]:has(
+        button[aria-label="Storico"]
+    ) > div {
         padding: 0 !important;
     }
-    [data-testid="stHorizontalBlock"]:has(button[title="Fitness"]) button,
-    [data-testid="stHorizontalBlock"]:has(button[title="Home"]) button {
-        opacity: 0 !important;
-        height: 52px !important;
-        min-height: 52px !important;
-        border: none !important;
+    [data-testid="stHorizontalBlock"]:has(
+        button[aria-label="Storico"]
+    ) button {
+        min-height: 48px !important;
+        height: 48px !important;
+        font-size: 22px !important;
         border-radius: 12px !important;
+        border: none !important;
+        padding: 4px !important;
+    }
+    [data-testid="stHorizontalBlock"]:has(
+        button[aria-label="Storico"]
+    ) button[kind="secondary"] {
+        background: #f8f8f8 !important;
+        color: #555 !important;
+    }
+    [data-testid="stHorizontalBlock"]:has(
+        button[aria-label="Storico"]
+    ) button[kind="primary"] {
+        background: #E3F2FD !important;
+        color: #1565C0 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -2405,37 +2393,34 @@ if st.session_state.mob_menu == "dashboard":
     st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 8px;color:#1a1a1a">🏅 Ultime attività</h4></div>',
                 unsafe_allow_html=True)
 
-    # CSS per le card cliccabili con overlay trasparente
+    # CSS per le card attività — hover effect, niente overlay invisibile
     st.markdown("""
     <style>
-    .clickable-card-wrap {
-        position: relative;
-        margin: 0 12px 10px;
-    }
-    .clickable-card-wrap .act-card {
+    .act-card-wrap { margin: 0 12px 10px; }
+    .act-card-wrap .act-card {
         margin: 0 !important;
-        border-radius: 14px !important;
-        cursor: pointer;
-        transition: box-shadow 0.15s, transform 0.1s;
+        border-radius: 14px 14px 0 0 !important;
     }
-    .clickable-card-wrap .act-card:hover {
-        box-shadow: 0 4px 16px rgba(0,0,0,0.13) !important;
-        transform: translateY(-1px);
+    /* Bottone dettaglio cucito sotto la card */
+    .act-card-wrap > div[data-testid="stButton"] {
+        margin: 0 !important;
+        padding: 0 !important;
     }
-    /* Bottone overlay trasparente sopra la card */
-    .clickable-card-wrap > div[data-testid="stButton"] {
-        position: absolute !important;
-        top: 0 !important; left: 0 !important;
-        width: 100% !important; height: 100% !important;
-        margin: 0 !important; padding: 0 !important;
-        z-index: 2 !important;
+    .act-card-wrap > div[data-testid="stButton"] > button {
+        border-radius: 0 0 14px 14px !important;
+        border-top: 1px solid #f0f0f0 !important;
+        border-left: none !important;
+        border-right: none !important;
+        border-bottom: none !important;
+        background: #fafafa !important;
+        color: #1565C0 !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        min-height: 38px !important;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.07) !important;
     }
-    .clickable-card-wrap > div[data-testid="stButton"] > button {
-        width: 100% !important; height: 100% !important;
-        opacity: 0 !important;
-        border: none !important;
-        background: transparent !important;
-        cursor: pointer !important;
+    .act-card-wrap > div[data-testid="stButton"] > button:hover {
+        background: #E3F2FD !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -2457,7 +2442,6 @@ if st.session_state.mob_menu == "dashboard":
         _tss5   = f"{_row5['tss']:.0f}"
         _cals5  = _m5["cals"]
 
-        # Pills: aggiungi FC max e calorie se disponibili
         _pills = (
             f'<span class="act-pill">📏 <b>{_m5["dist_str"]}</b></span>'
             f'<span class="act-pill">⏱ <b>{_m5["dur_str"]}</b></span>'
@@ -2471,8 +2455,7 @@ if st.session_state.mob_menu == "dashboard":
             _pills += f'<span class="act-pill">🔥 <b>{_cals5}</b></span>'
         _pills += f'<span class="act-pill">TSS <b>{_tss5}</b></span>'
 
-        # Wrapper position:relative per contenere il bottone overlay
-        st.markdown('<div class="clickable-card-wrap">', unsafe_allow_html=True)
+        st.markdown('<div class="act-card-wrap">', unsafe_allow_html=True)
         st.markdown(
             f'<div class="act-card" style="border-left-color:{_color5}">'
             + (f'<div class="mob-card-title">⏱ Ultima Attività</div>' if _is_first else "")
@@ -2482,8 +2465,8 @@ if st.session_state.mob_menu == "dashboard":
             f'<div class="act-pills" style="margin-top:6px">{_pills}</div>'
             f'</div>',
             unsafe_allow_html=True)
-        # Bottone trasparente sovrapposto — rende la card cliccabile
-        if st.button(" ", key=f"dash5_{_id5}", use_container_width=True):
+        # Pulsante 🔍 visibile cucito sotto la card
+        if st.button("🔍  Apri dettaglio", key=f"dash5_{_id5}", use_container_width=True):
             st.session_state.selected_act_id = _id5
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
@@ -2892,7 +2875,7 @@ elif st.session_state.mob_menu == "storico":
                     _pills_s += f'<span class="act-pill">🔥 <b>{m_["cals"]}</b></span>'
                 _pills_s += f'<span class="act-pill">TSS <b>{row["tss"]:.0f}</b></span>'
 
-                st.markdown('<div class="clickable-card-wrap">', unsafe_allow_html=True)
+                st.markdown('<div class="act-card-wrap">', unsafe_allow_html=True)
                 st.markdown(
                     f'<div class="act-card" style="border-left-color:{s_["color"]}">'
                     f'<div class="act-title">{s_["icon"]} {str(row["name"])}</div>'
@@ -2903,7 +2886,7 @@ elif st.session_state.mob_menu == "storico":
                     f'<div class="act-pills" style="margin-top:6px">{_pills_s}</div>'
                     f'</div>',
                     unsafe_allow_html=True)
-                if st.button(" ", key=f"cal_det_{_id}", use_container_width=True):
+                if st.button("🔍  Apri dettaglio", key=f"cal_det_{_id}", use_container_width=True):
                     st.session_state.selected_act_id = _id
                     st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
