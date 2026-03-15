@@ -194,76 +194,44 @@ if not st.session_state.get("_css_injected"):
       margin-top: 2px;
   }
 
-  /* Attività card mobile */
+
+  /* Attività card mobile — bordo visibile su tutti i lati */
   .act-card {
       background: #fff;
       border-radius: 14px;
-      padding: 14px 16px;
+      padding: 12px 14px 10px;
       margin: 8px 12px 0;
       box-shadow: 0 2px 10px rgba(0,0,0,0.07);
       border-left: 4px solid #ccc;
-      border-top: 1px solid #e8e8e8;
-      border-right: 1px solid #e8e8e8;
-      border-bottom: 1px solid #e8e8e8;
+      border-top: 1px solid #e2e2e2;
+      border-right: 1px solid #e2e2e2;
+      border-bottom: 1px solid #e2e2e2;
+      position: relative;        /* per il bottone assoluto interno */
+      overflow: hidden;
+      padding-bottom: 38px !important; /* spazio per il bottone */
   }
 
-  /* Bottone dettaglio cucito sotto la card */
-  .act-card + div[data-testid="stButton"] {
-      margin: 0 12px 0 !important;
-      padding: 0 !important;
+  /* Bottone 🔍 sovrapposto dentro la card, in basso a destra */
+  .act-card .det-btn {
+      position: absolute;
+      bottom: 0; right: 0;
+      background: #E8F4FD;
+      color: #1565C0;
+      border: none;
+      border-top: 1px solid #e2e2e2;
+      border-left: 1px solid #e2e2e2;
+      border-radius: 0 0 10px 0;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+      -webkit-tap-highlight-color: transparent;
   }
-  .act-card + div[data-testid="stButton"] > button {
-      border-radius: 0 0 14px 14px !important;
-      border-top: 1px solid #f0f0f0 !important;
-      background: #fafafa !important;
-      color: #1565C0 !important;
-      font-size: 13px !important;
-      font-weight: 600 !important;
-      min-height: 40px !important;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06) !important;
-      border-left: none !important;
-      border-right: none !important;
-      border-bottom: none !important;
-  }
-  .act-card + div[data-testid="stButton"] > button:hover {
-      background: #E3F2FD !important;
+  .act-card .det-btn:hover, .act-card .det-btn:active {
+      background: #BBDEFB;
   }
 
-  /* Wrapper card + bottone piccolo */
-  .act-card-wrap { margin: 8px 12px 0; }
-  .act-card-wrap .act-card { margin: 0 !important; }
-
-  /* Riga bottone 🔍 — sotto la card, allineata a destra */
-  .act-card-wrap > div[data-testid="stHorizontalBlock"] {
-      margin: 0 !important;
-      padding: 0 !important;
-      background: #fff !important;
-      border: 1px solid #e8e8e8 !important;
-      border-top: none !important;
-      border-radius: 0 0 14px 14px !important;
-      box-shadow: 0 3px 8px rgba(0,0,0,0.06) !important;
-  }
-  /* Colonna vuota sinistra */
-  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:first-child {
-      padding: 0 !important;
-  }
-  /* Colonna bottone destra */
-  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:last-child {
-      padding: 2px 8px 4px !important;
-  }
-  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:last-child button {
-      min-height: 32px !important;
-      height: 32px !important;
-      font-size: 16px !important;
-      border-radius: 8px !important;
-      padding: 0 !important;
-      background: #E3F2FD !important;
-      color: #1565C0 !important;
-      border: none !important;
-  }
-  .act-card-wrap > div[data-testid="stHorizontalBlock"] > div:last-child button:hover {
-      background: #BBDEFB !important;
-  }
 
   .act-title {
       font-size: 15px;
@@ -1578,6 +1546,17 @@ if "code" in st.query_params and not st.session_state.strava_token_info.get("acc
         st.session_state.strava_token_info = res
         st.rerun()
 
+# Gestisci query param ?act=ID (click su card HTML)
+_act_param = st.query_params.get("act", "")
+if _act_param:
+    try:
+        _act_id = int(_act_param)
+    except Exception:
+        _act_id = _act_param
+    st.session_state.selected_act_id = _act_id
+    st.query_params.clear()
+    st.rerun()
+
 # ============================================================
 # BOTTOM NAV BAR
 # ============================================================
@@ -1589,76 +1568,134 @@ NAV_ITEMS = [
     ("profilo",   "👤", "Profilo"),
 ]
 
-def render_bottom_nav():
+def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
+                    act_id, header_label="", key_prefix="act"):
     """
-    Bottom nav — bottoni orizzontali compatti fissi in basso.
-    Approccio: CSS aggressivo che schiaccia la riga di colonne Streamlit.
+    Renderizza una card attività completa in HTML puro.
+    Il bottone 🔍 è sovrapposto in basso a destra via position:absolute.
+    Il click setta ?act=ID nella URL — Streamlit lo legge e apre il dettaglio.
+    """
+    m = metrics
+    s = sport_info
+    _zc = zone_color
+    _zl = zone_label
+    _date = row_data["start_date"].strftime("%d %b · %H:%M")
+    _color = s["color"]
+
+    _header_html = (
+        f'<div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;'
+        f'letter-spacing:0.5px;margin-bottom:6px">{header_label}</div>'
+        if header_label else ""
+    )
+
+    # Pills
+    _pills = (
+        f'<span class="act-pill">📏 <b>{m["dist_str"]}</b></span>'
+        f'<span class="act-pill">⏱ <b>{m["dur_str"]}</b></span>'
+        f'<span class="act-pill">⚡ <b>{m["pace_str"]}</b></span>'
+        f'<span class="act-pill">⛰ <b>{m["elev"]}</b></span>'
+        f'<span class="act-pill">❤️ <b>{m["hr_avg"]} bpm</b></span>'
+    )
+    if m["hr_max"] != "—":
+        _pills += f'<span class="act-pill">💓 <b>{m["hr_max"]} bpm</b></span>'
+    if m["cals"] != "—":
+        _pills += f'<span class="act-pill">🔥 <b>{m["cals"]}</b></span>'
+    _pills += f'<span class="act-pill">TSS <b>{row_data["tss"]:.0f}</b></span>'
+
+    # Bottone: usa ?act=ID per navigare
+    _btn_href = f"?act={act_id}"
+
+    card_html = f"""
+<div class="act-card" style="border-left-color:{_color}">
+  {_header_html}
+  <div class="act-title">{s["icon"]} {str(row_data["name"])}</div>
+  <div class="act-meta">{_date} &middot;
+    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>
+  </div>
+  <div class="act-pills" style="margin-top:6px">{_pills}</div>
+  <a class="det-btn" href="{_btn_href}"
+     onclick="actGo(event,'{act_id}')">🔍 Dettaglio</a>
+</div>
+<script>
+function actGo(e, id) {{
+  e.preventDefault();
+  var url = new URL(window.location.href);
+  url.searchParams.set('act', id);
+  window.location.href = url.toString();
+}}
+</script>
+"""
+    st.markdown(card_html, unsafe_allow_html=True)
+    """
+    Bottom nav 100% HTML+JS puro — funziona su desktop e mobile Chrome/Safari.
+    Usa window.location per cambiare il query param ?nav=X che Streamlit legge.
+    Nessun bottone Streamlit — zero problemi di layout verticale.
     """
     cur = st.session_state.mob_menu
 
-    # Inietta il CSS una sola volta per sessione
-    if not st.session_state.get("_nav_css_injected"):
-        st.session_state["_nav_css_injected"] = True
-        st.markdown("""<style>
-/* ── NAV BAR FISSA ──────────────────────────────── */
-#nav-anchor + div [data-testid="stHorizontalBlock"] {
-    position: fixed !important;
-    bottom: 0 !important; left: 0 !important; right: 0 !important;
-    z-index: 9999 !important;
-    background: #fff !important;
-    border-top: 1.5px solid #e8e8e8 !important;
-    box-shadow: 0 -2px 16px rgba(0,0,0,0.08) !important;
-    padding: 4px 4px 8px !important;
-    margin: 0 !important;
-    flex-direction: row !important;
-    gap: 2px !important;
-}
-#nav-anchor + div [data-testid="stHorizontalBlock"] > div {
-    padding: 0 !important;
-    flex: 1 !important;
-    min-width: 0 !important;
-}
-#nav-anchor + div [data-testid="stHorizontalBlock"] button {
-    height: 44px !important;
-    min-height: 44px !important;
-    max-height: 44px !important;
-    font-size: 20px !important;
-    padding: 0 !important;
-    border-radius: 10px !important;
-    border: none !important;
-    width: 100% !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    line-height: 1 !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-}
-#nav-anchor + div [data-testid="stHorizontalBlock"] button p {
-    font-size: 20px !important;
-    margin: 0 !important;
-    line-height: 1 !important;
-}
-#nav-anchor + div [data-testid="stHorizontalBlock"] button[kind="secondary"] {
-    background: #f8f8f8 !important; color: #555 !important;
-}
-#nav-anchor + div [data-testid="stHorizontalBlock"] button[kind="primary"] {
-    background: #E3F2FD !important; color: #1565C0 !important;
-}
-</style>""", unsafe_allow_html=True)
+    # Leggi il nav param dalla URL (se presente)
+    _nav_param = st.query_params.get("nav", "")
+    if _nav_param and _nav_param != cur:
+        # Aggiorna la sessione e resetta il param
+        valid_keys = [k for k, _, _ in NAV_ITEMS]
+        if _nav_param in valid_keys:
+            st.session_state.mob_menu = _nav_param
+            st.session_state.selected_act_id = None
+            st.query_params.clear()
+            st.rerun()
 
-    # Ancora HTML — il CSS sopra seleziona il blocco colonne immediatamente dopo
-    st.markdown('<div id="nav-anchor"></div>', unsafe_allow_html=True)
+    # Costruisci i tab HTML
+    _tabs_html = ""
+    for key, icon, label in NAV_ITEMS:
+        _active = "nav-active" if cur == key else ""
+        _tabs_html += (
+            f'<a class="nav-tab {_active}" href="?nav={key}" '
+            f'onclick="navGo(event,\'{key}\')" title="{label}">'
+            f'<span class="nav-icon">{icon}</span>'
+            f'</a>'
+        )
 
-    _cols = st.columns(5)
-    for i, (key, icon, label) in enumerate(NAV_ITEMS):
-        with _cols[i]:
-            _t = "primary" if cur == key else "secondary"
-            if st.button(icon, key=f"nav_btn_{key}", use_container_width=True,
-                         type=_t, help=label):
-                st.session_state.mob_menu = key
-                st.session_state.selected_act_id = None
-                st.rerun()
+    st.markdown(f"""
+<style>
+.bottom-nav-bar {{
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 56px;
+    background: #ffffff;
+    border-top: 1.5px solid #e8e8e8;
+    box-shadow: 0 -2px 16px rgba(0,0,0,0.09);
+    display: flex;
+    z-index: 99999;
+    padding: 0 4px 6px;
+}}
+.nav-tab {{
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    border-radius: 10px;
+    margin: 4px 2px 0;
+    transition: background 0.12s;
+    -webkit-tap-highlight-color: transparent;
+}}
+.nav-tab:hover {{ background: #f0f0f0; }}
+.nav-active {{ background: #E3F2FD !important; }}
+.nav-icon {{ font-size: 22px; line-height: 1; }}
+/* Spazio in fondo al contenuto per non coprirlo */
+.block-container {{ padding-bottom: 70px !important; }}
+</style>
+<div class="bottom-nav-bar">{_tabs_html}</div>
+<script>
+function navGo(e, key) {{
+    e.preventDefault();
+    // Setta il query param e ricarica Streamlit
+    const url = new URL(window.location.href);
+    url.searchParams.set('nav', key);
+    window.location.href = url.toString();
+}}
+</script>
+""", unsafe_allow_html=True)
 
 # ============================================================
 # LOGIN PAGE
@@ -2436,85 +2473,16 @@ if st.session_state.mob_menu == "dashboard":
     st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 8px;color:#1a1a1a">🏅 Ultime attività</h4></div>',
                 unsafe_allow_html=True)
 
-    # CSS per le card attività — hover effect, niente overlay invisibile
-    st.markdown("""
-    <style>
-    .act-card-wrap { margin: 0 12px 10px; }
-    .act-card-wrap .act-card {
-        margin: 0 !important;
-        border-radius: 14px 14px 0 0 !important;
-    }
-    /* Bottone dettaglio cucito sotto la card */
-    .act-card-wrap > div[data-testid="stButton"] {
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    .act-card-wrap > div[data-testid="stButton"] > button {
-        border-radius: 0 0 14px 14px !important;
-        border-top: 1px solid #f0f0f0 !important;
-        border-left: none !important;
-        border-right: none !important;
-        border-bottom: none !important;
-        background: #fafafa !important;
-        color: #1565C0 !important;
-        font-size: 13px !important;
-        font-weight: 700 !important;
-        min-height: 38px !important;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.07) !important;
-    }
-    .act-card-wrap > div[data-testid="stButton"] > button:hover {
-        background: #E3F2FD !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
+    # CSS card-wrap non più necessario — ora tutto in HTML puro
     _last5_df = df.iloc[-5:][::-1]
     for _i5, (_, _row5) in enumerate(_last5_df.iterrows()):
-        _s5   = get_sport_info(_row5["type"], _row5.get("name",""))
-        _m5   = format_metrics(_row5)
-        _id5  = _row5.get("id", _row5.name)
+        _s5  = get_sport_info(_row5["type"], _row5.get("name",""))
+        _m5  = format_metrics(_row5)
+        _id5 = _row5.get("id", _row5.name)
         _zn5, _zc5, _zl5 = get_zone_for_activity(_row5, u["fc_max"])
-        _is_first = (_i5 == 0)
-
-        _name5  = str(_row5["name"])
-        _date5  = _row5["start_date"].strftime("%d %b %Y · %H:%M")
-        _icon5  = _s5["icon"]
-        _color5 = _s5["color"]
-        _hr5    = _m5["hr_avg"]
-        _hrmax5 = _m5["hr_max"]
-        _tss5   = f"{_row5['tss']:.0f}"
-        _cals5  = _m5["cals"]
-
-        _pills = (
-            f'<span class="act-pill">📏 <b>{_m5["dist_str"]}</b></span>'
-            f'<span class="act-pill">⏱ <b>{_m5["dur_str"]}</b></span>'
-            f'<span class="act-pill">⚡ <b>{_m5["pace_str"]}</b></span>'
-            f'<span class="act-pill">⛰ <b>{_m5["elev"]}</b></span>'
-            f'<span class="act-pill">❤️ <b>{_hr5} bpm</b></span>'
-        )
-        if _hrmax5 != "—":
-            _pills += f'<span class="act-pill">💓 <b>{_hrmax5} bpm</b></span>'
-        if _cals5 != "—":
-            _pills += f'<span class="act-pill">🔥 <b>{_cals5}</b></span>'
-        _pills += f'<span class="act-pill">TSS <b>{_tss5}</b></span>'
-
-        st.markdown('<div class="act-card-wrap">', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="act-card" style="border-left-color:{_color5}">'
-            + (f'<div class="mob-card-title">⏱ Ultima Attività</div>' if _is_first else "")
-            + f'<div class="act-title">{_icon5} {_name5}</div>'
-            f'<div class="act-meta">{_date5} · '
-            f'<span class="zone-chip" style="background:{_zc5}22;color:{_zc5}">{_zl5}</span></div>'
-            f'<div class="act-pills" style="margin-top:6px">{_pills}</div>'
-            f'</div>',
-            unsafe_allow_html=True)
-        # Pulsante quadrato piccolo a destra
-        _bc1, _bc2 = st.columns([5, 1])
-        with _bc2:
-            if st.button("🔍", key=f"dash5_{_id5}", help="Apri dettaglio"):
-                st.session_state.selected_act_id = _id5
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        _hdr = "⏱ Ultima Attività" if _i5 == 0 else ""
+        render_act_card(_row5, _m5, _s5, _zc5, _zl5, _id5, header_label=_hdr,
+                        key_prefix="dash5")
 
         # Solo prima attività: mappa + AI
         if _is_first:
@@ -2768,26 +2736,7 @@ elif st.session_state.mob_menu == "storico":
             m   = format_metrics(row)
             z_n, z_c, z_l = get_zone_for_activity(row, u["fc_max"])
             _act_id = row.get("id", row.name)
-
-            st.markdown(f"""
-            <div class="act-card" style="border-left-color:{s['color']}">
-                <div class="act-title">{s['icon']} {row['name']}</div>
-                <div class="act-meta">{row['start_date'].strftime('%d %b %Y · %H:%M')} ·
-                    <span class="zone-chip" style="background:{z_c}22;color:{z_c}">{z_l}</span>
-                </div>
-                <div class="act-pills">
-                    <span class="act-pill">📏 <b>{m['dist_str']}</b></span>
-                    <span class="act-pill">⏱️ <b>{m['dur_str']}</b></span>
-                    <span class="act-pill">⚡ <b>{m['pace_str']}</b></span>
-                    <span class="act-pill">⛰️ <b>{m['elev']}</b></span>
-                    <span class="act-pill">📊 TSS <b>{row['tss']:.0f}</b></span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            if st.button("🔍 Dettaglio", key=f"list_{_act_id}", use_container_width=True):
-                st.session_state.selected_act_id = _act_id
-                st.rerun()
+            render_act_card(row, m, s, z_c, z_l, _act_id, key_prefix="list")
 
     else:
         # ── Calendario mensile con navigazione rapida ──
@@ -2906,37 +2855,7 @@ elif st.session_state.mob_menu == "storico":
                 m_   = format_metrics(row)
                 _id  = row.get("id", row.name)
                 _zn, _zc, _zl = get_zone_for_activity(row, u["fc_max"])
-
-                _pills_s = (
-                    f'<span class="act-pill">📏 <b>{m_["dist_str"]}</b></span>'
-                    f'<span class="act-pill">⏱ <b>{m_["dur_str"]}</b></span>'
-                    f'<span class="act-pill">⚡ <b>{m_["pace_str"]}</b></span>'
-                    f'<span class="act-pill">⛰ <b>{m_["elev"]}</b></span>'
-                    f'<span class="act-pill">❤️ <b>{m_["hr_avg"]} bpm</b></span>'
-                )
-                if m_["hr_max"] != "—":
-                    _pills_s += f'<span class="act-pill">💓 <b>{m_["hr_max"]} bpm</b></span>'
-                if m_["cals"] != "—":
-                    _pills_s += f'<span class="act-pill">🔥 <b>{m_["cals"]}</b></span>'
-                _pills_s += f'<span class="act-pill">TSS <b>{row["tss"]:.0f}</b></span>'
-
-                st.markdown('<div class="act-card-wrap">', unsafe_allow_html=True)
-                st.markdown(
-                    f'<div class="act-card" style="border-left-color:{s_["color"]}">'
-                    f'<div class="act-title">{s_["icon"]} {str(row["name"])}</div>'
-                    f'<div class="act-meta">'
-                    f'{row["start_date"].strftime("%d %b · %H:%M")} &middot; '
-                    f'<span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>'
-                    f'</div>'
-                    f'<div class="act-pills" style="margin-top:6px">{_pills_s}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True)
-                _sc1, _sc2 = st.columns([5, 1])
-                with _sc2:
-                    if st.button("🔍", key=f"cal_det_{_id}", help="Apri dettaglio"):
-                        st.session_state.selected_act_id = _id
-                        st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
+                render_act_card(row, m_, s_, _zc, _zl, _id, key_prefix="cal")
 
 # ============================================================
 # ── MENU: COACH CHAT ─────────────────────────────────────────
