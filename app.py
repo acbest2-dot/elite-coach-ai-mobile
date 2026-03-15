@@ -136,6 +136,12 @@ st.markdown("""
       max-width: 100% !important;
   }
 
+  /* Nascondi toolbar Streamlit che overlappa la nav su mobile */
+  [data-testid="stToolbar"] { display: none !important; }
+  [data-testid="stDecoration"] { display: none !important; }
+  [data-testid="stStatusWidget"] { display: none !important; }
+  .stDeployButton { display: none !important; }
+
   /* Header app */
   .mob-header {
       background: linear-gradient(135deg, #1565C0, #0D47A1);
@@ -197,37 +203,34 @@ st.markdown("""
   .act-card {
       background: #fff;
       border-radius: 14px;
-      padding: 12px 14px 10px;
+      padding: 12px 14px 12px;
       margin: 8px 12px 0;
       box-shadow: 0 2px 10px rgba(0,0,0,0.07);
       border-left: 4px solid #ccc;
       border-top: 1px solid #e2e2e2;
       border-right: 1px solid #e2e2e2;
       border-bottom: 1px solid #e2e2e2;
-      position: relative;        /* per il bottone assoluto interno */
-      overflow: hidden;
-      padding-bottom: 38px !important; /* spazio per il bottone */
   }
 
-  /* Bottone 🔍 sovrapposto dentro la card, in basso a destra */
-  .act-card .det-btn {
-      position: absolute;
-      bottom: 8px; right: 10px;
-      background: #E8F4FD;
-      color: #1565C0;
-      border: 1px solid #b3d9f7;
-      border-radius: 20px;
-      padding: 5px 14px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      text-decoration: none;
-      transition: background 0.15s;
-      -webkit-tap-highlight-color: transparent;
-      display: inline-block;
+  /* Wrapper card + bottone 🔍 — bottone piccolo tondo a destra */
+  .act-card {
+      margin-bottom: 0 !important;
+      border-radius: 14px 14px 0 0 !important;
   }
-  .act-card .det-btn:hover, .act-card .det-btn:active {
-      background: #BBDEFB;
+  /* Riga con bottone 🔍 sotto la card */
+  div[data-testid="stHorizontalBlock"]:has(> div:first-child:empty) + div,
+  .act-card + div { margin-top: 0 !important; }
+
+  /* CSS per il bottone 🔍 piccolo */
+  .det-btn-row > div:last-child button {
+      border-radius: 20px !important;
+      padding: 4px 10px !important;
+      font-size: 16px !important;
+      min-height: 32px !important;
+      height: 32px !important;
+      background: #E8F4FD !important;
+      color: #1565C0 !important;
+      border: 1px solid #b3d9f7 !important;
   }
 
   .act-title {
@@ -358,17 +361,10 @@ st.markdown("""
       flex-shrink: 0;
   }
 
-  /* Hide streamlit branding e toolbar che overlappano la nav */
+  /* Hide streamlit branding */
   #MainMenu { visibility: hidden; }
   footer { visibility: hidden; }
   header { visibility: hidden; }
-  /* Nasconde il toolbar di Streamlit Cloud (hamburger + manage app) su mobile */
-  [data-testid="stToolbar"] { display: none !important; }
-  [data-testid="stDecoration"] { display: none !important; }
-  [data-testid="stStatusWidget"] { display: none !important; }
-  .stDeployButton { display: none !important; }
-  /* Alza la barra nav per evitare overlap con eventuali icone residue */
-  .bottom-nav-bar { bottom: 8px !important; border-radius: 16px !important; margin: 0 8px !important; right: 8px !important; left: 8px !important; }
 </style>
 """, unsafe_allow_html=True)
 # fine CSS injection
@@ -1550,29 +1546,15 @@ if "code" in st.query_params and not st.session_state.strava_token_info.get("acc
         st.session_state.strava_token_info = res
         st.rerun()
 
-# Gestisci query param ?act=ID (click su card HTML)
+# Gestisci ?act=ID — apre dettaglio attività da card HTML
 _act_param = st.query_params.get("act", "")
 if _act_param:
     try:
-        _act_id = int(_act_param)
+        st.session_state.selected_act_id = int(_act_param)
     except Exception:
-        _act_id = _act_param
-    st.session_state.selected_act_id = _act_id
+        st.session_state.selected_act_id = _act_param
     st.query_params.clear()
-    st.rerun()
-
-# Gestisci query param ?nav=X (click su nav bar HTML) — PRIMA del token check
-_nav_param_early = st.query_params.get("nav", "")
-if _nav_param_early:
-    _valid_nav = [k for k, _, _ in [
-        ("dashboard","📊","Home"), ("fitness","💪","Fitness"),
-        ("storico","📅","Storico"), ("chat","💬","Coach"), ("profilo","👤","Profilo")
-    ]]
-    if _nav_param_early in _valid_nav:
-        st.session_state.mob_menu = _nav_param_early
-        st.session_state.selected_act_id = None
-    st.query_params.clear()
-    # Non fare rerun qui — lascia che la pagina continui normalmente
+    # Non serve rerun — la pagina si renderizza con il nuovo selected_act_id
 
 # ============================================================
 # BOTTOM NAV BAR
@@ -1586,58 +1568,109 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Nav bar HTML+JS pura, fissa in basso."""
+    """
+    Nav bar con bottoni Streamlit nativi — non perde la sessione.
+    CSS li forza orizzontali, compatti, fissi in basso sopra le icone Streamlit.
+    """
     cur = st.session_state.mob_menu
 
-    # Costruisci i tab HTML
-    _tabs_html = ""
-    for key, icon, label in NAV_ITEMS:
-        _active = "nav-active" if cur == key else ""
-        _tabs_html += (
-            f'<a class="nav-tab {_active}" href="?nav={key}" '
-            f'onclick="navGo(event,\'{key}\')" title="{label}">'
-            f'<span class="nav-icon">{icon}</span>'
-            f'</a>'
-        )
-
-    st.markdown(f"""
+    # CSS iniettato ogni volta (semplice, nessun guard)
+    st.markdown("""
 <style>
-.bottom-nav-bar {{
-    position: fixed;
-    bottom: 50px; left: 8px; right: 8px;
-    height: 54px;
-    background: #ffffff;
-    border: 1.5px solid #e8e8e8;
-    border-radius: 16px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
-    display: flex;
-    z-index: 99999;
-    padding: 4px 6px;
-}}
-.nav-tab {{
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    border-radius: 12px;
-    transition: background 0.12s;
-    -webkit-tap-highlight-color: transparent;
-}}
-.nav-tab:hover {{ background: #f0f0f0; }}
-.nav-active {{ background: #E3F2FD !important; }}
-.nav-icon {{ font-size: 22px; line-height: 1; }}
+/* Wrapper della nav — identificato dal data-testid del container padre */
+div[data-testid="stBottom"] {
+    position: fixed !important;
+    bottom: 50px !important;
+    left: 8px !important;
+    right: 8px !important;
+    z-index: 99999 !important;
+    background: #fff !important;
+    border: 1.5px solid #e8e8e8 !important;
+    border-radius: 16px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+    padding: 4px 6px !important;
+}
+/* Forza la riga di colonne orizzontale e compatta */
+div[data-testid="stBottom"] [data-testid="stHorizontalBlock"] {
+    gap: 2px !important;
+    flex-wrap: nowrap !important;
+}
+div[data-testid="stBottom"] [data-testid="stHorizontalBlock"] > div {
+    padding: 0 !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+}
+/* Bottoni: quadrati piccoli con solo emoji */
+div[data-testid="stBottom"] button {
+    height: 44px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    font-size: 22px !important;
+    border-radius: 12px !important;
+    border: none !important;
+    width: 100% !important;
+    line-height: 1 !important;
+}
+div[data-testid="stBottom"] button[kind="secondary"] {
+    background: #f8f8f8 !important;
+    color: #555 !important;
+}
+div[data-testid="stBottom"] button[kind="primary"] {
+    background: #E3F2FD !important;
+    color: #1565C0 !important;
+}
+/* Fallback: se stBottom non disponibile, usa l'ancora */
+#nav-row-anchor + div [data-testid="stHorizontalBlock"] {
+    position: fixed !important;
+    bottom: 50px !important;
+    left: 8px !important;
+    right: 8px !important;
+    z-index: 99999 !important;
+    background: #fff !important;
+    border: 1.5px solid #e8e8e8 !important;
+    border-radius: 16px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+    padding: 4px 6px !important;
+    gap: 2px !important;
+    flex-wrap: nowrap !important;
+    margin: 0 !important;
+}
+#nav-row-anchor + div [data-testid="stHorizontalBlock"] > div {
+    padding: 0 !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+}
+#nav-row-anchor + div [data-testid="stHorizontalBlock"] button {
+    height: 44px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    font-size: 22px !important;
+    border-radius: 12px !important;
+    border: none !important;
+    width: 100% !important;
+    line-height: 1 !important;
+}
+#nav-row-anchor + div [data-testid="stHorizontalBlock"] button[kind="secondary"] {
+    background: #f8f8f8 !important;
+    color: #555 !important;
+}
+#nav-row-anchor + div [data-testid="stHorizontalBlock"] button[kind="primary"] {
+    background: #E3F2FD !important;
+    color: #1565C0 !important;
+}
 </style>
-<div class="bottom-nav-bar">{_tabs_html}</div>
-<script>
-function navGo(e, key) {{
-    e.preventDefault();
-    var url = new URL(window.location.href);
-    url.searchParams.set('nav', key);
-    window.location.href = url.toString();
-}}
-</script>
 """, unsafe_allow_html=True)
+
+    st.markdown('<div id="nav-row-anchor"></div>', unsafe_allow_html=True)
+    cols = st.columns(5)
+    for i, (key, icon, label) in enumerate(NAV_ITEMS):
+        with cols[i]:
+            _t = "primary" if cur == key else "secondary"
+            if st.button(icon, key=f"nav_btn_{key}",
+                         use_container_width=True, type=_t, help=label):
+                st.session_state.mob_menu = key
+                st.session_state.selected_act_id = None
+                st.rerun()
 
 
 def get_act_micro_comment(row_data, metrics, sport_info) -> str:
@@ -1708,9 +1741,6 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         if _micro else ""
     )
 
-    # Bottone: usa ?act=ID per navigare
-    _btn_href = f"?act={act_id}"
-
     card_html = f"""
 <div class="act-card" style="border-left-color:{_color}">
   {_header_html}
@@ -1718,20 +1748,16 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
   <div class="act-meta">{_date} &middot;
     <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_micro_html}
   </div>
-  <div class="act-pills" style="margin-top:6px;margin-bottom:36px">{_pills}</div>
-  <a class="det-btn" href="{_btn_href}"
-     onclick="actGo(event,'{act_id}')">🔍 Dettaglio</a>
+  <div class="act-pills" style="margin-top:6px">{_pills}</div>
 </div>
-<script>
-function actGo(e, id) {{
-  e.preventDefault();
-  var url = new URL(window.location.href);
-  url.searchParams.set('act', id);
-  window.location.href = url.toString();
-}}
-</script>
 """
     st.markdown(card_html, unsafe_allow_html=True)
+    # Bottone Streamlit — non causa session reset, bordi tondi, allineato a destra
+    _cb1, _cb2 = st.columns([6, 1])
+    with _cb2:
+        if st.button("🔍", key=f"{key_prefix}_{act_id}", help="Apri dettaglio"):
+            st.session_state.selected_act_id = act_id
+            st.rerun()
 
 # ============================================================
 # LOGIN PAGE
