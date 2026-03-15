@@ -132,7 +132,7 @@ st.markdown("""
 
   /* Padding per contenuto — spazio in basso per nav bar */
   .block-container {
-      padding: 0 0 72px 0 !important;
+      padding: 0 0 120px 0 !important;
       max-width: 100% !important;
   }
 
@@ -212,24 +212,23 @@ st.markdown("""
   /* Bottone 🔍 sovrapposto dentro la card, in basso a destra */
   .act-card .det-btn {
       position: absolute;
-      bottom: 0; right: 0;
+      bottom: 8px; right: 10px;
       background: #E8F4FD;
       color: #1565C0;
-      border: none;
-      border-top: 1px solid #e2e2e2;
-      border-left: 1px solid #e2e2e2;
-      border-radius: 0 0 10px 0;
-      padding: 6px 14px;
-      font-size: 13px;
+      border: 1px solid #b3d9f7;
+      border-radius: 20px;
+      padding: 5px 14px;
+      font-size: 12px;
       font-weight: 700;
       cursor: pointer;
+      text-decoration: none;
       transition: background 0.15s;
       -webkit-tap-highlight-color: transparent;
+      display: inline-block;
   }
   .act-card .det-btn:hover, .act-card .det-btn:active {
       background: #BBDEFB;
   }
-
 
   .act-title {
       font-size: 15px;
@@ -255,7 +254,7 @@ st.markdown("""
       color: #333;
       font-weight: 500;
   }
-  .act-pill b { color: #e94560; }
+  .act-pill b { color: #333; }  /* era #e94560 (rosso) → nero */
 
   /* Zone badge */
   .zone-chip {
@@ -1562,6 +1561,19 @@ if _act_param:
     st.query_params.clear()
     st.rerun()
 
+# Gestisci query param ?nav=X (click su nav bar HTML) — PRIMA del token check
+_nav_param_early = st.query_params.get("nav", "")
+if _nav_param_early:
+    _valid_nav = [k for k, _, _ in [
+        ("dashboard","📊","Home"), ("fitness","💪","Fitness"),
+        ("storico","📅","Storico"), ("chat","💬","Coach"), ("profilo","👤","Profilo")
+    ]]
+    if _nav_param_early in _valid_nav:
+        st.session_state.mob_menu = _nav_param_early
+        st.session_state.selected_act_id = None
+    st.query_params.clear()
+    # Non fare rerun qui — lascia che la pagina continui normalmente
+
 # ============================================================
 # BOTTOM NAV BAR
 # ============================================================
@@ -1574,21 +1586,8 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """
-    Bottom nav 100% HTML+JS puro — funziona su desktop e mobile Chrome/Safari.
-    Usa window.location per cambiare il query param ?nav=X che Streamlit legge.
-    """
+    """Nav bar HTML+JS pura, fissa in basso."""
     cur = st.session_state.mob_menu
-
-    # Leggi il nav param dalla URL (se presente)
-    _nav_param = st.query_params.get("nav", "")
-    if _nav_param and _nav_param != cur:
-        valid_keys = [k for k, _, _ in NAV_ITEMS]
-        if _nav_param in valid_keys:
-            st.session_state.mob_menu = _nav_param
-            st.session_state.selected_act_id = None
-            st.query_params.clear()
-            st.rerun()
 
     # Costruisci i tab HTML
     _tabs_html = ""
@@ -1605,7 +1604,7 @@ def render_bottom_nav():
 <style>
 .bottom-nav-bar {{
     position: fixed;
-    bottom: 8px; left: 8px; right: 8px;
+    bottom: 50px; left: 8px; right: 8px;
     height: 54px;
     background: #ffffff;
     border: 1.5px solid #e8e8e8;
@@ -1639,6 +1638,33 @@ function navGo(e, key) {{
 }}
 </script>
 """, unsafe_allow_html=True)
+
+
+def get_act_micro_comment(row_data, metrics, sport_info) -> str:
+    """Genera (e cacha) un brevissimo commento AI per la card attività — max 6 parole."""
+    _act_id = row_data.get("id", str(row_data.get("start_date", "")))
+    _key = f"micro_ai_{_act_id}"
+    if _key in st.session_state:
+        return st.session_state[_key]
+    if _ai_sdk_mode is None:
+        return ""
+    m = metrics
+    s = sport_info
+    _prompt = (
+        f"Attività: {s['label']}, {m['dist_str']}, {m['dur_str']}, "
+        f"D+{m['elev']}, FC {m['hr_avg']} bpm, {m['pace_str']}. "
+        f"Nome: {str(row_data.get('name',''))}. "
+        "Scrivi UNA frase brevissima (4-7 parole) che descriva questa sessione in modo specifico. "
+        "Es: 'Lungo aerobico in Z2' oppure 'Scialpinismo sul Sirente'. "
+        "Solo la frase, niente altro."
+    )
+    try:
+        _res = ai_generate(_prompt, max_tokens=30)
+        _res = _res.strip().strip('"').strip("'")
+        st.session_state[_key] = _res
+        return _res
+    except Exception:
+        return ""
 
 
 def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
@@ -1675,6 +1701,13 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         _pills += f'<span class="act-pill">🔥 <b>{m["cals"]}</b></span>'
     _pills += f'<span class="act-pill">TSS <b>{row_data["tss"]:.0f}</b></span>'
 
+    # Micro commento AI (cachato per act_id)
+    _micro = get_act_micro_comment(row_data, m, s)
+    _micro_html = (
+        f' &nbsp;<span style="font-size:11px;color:#555;font-style:italic">{_micro}</span>'
+        if _micro else ""
+    )
+
     # Bottone: usa ?act=ID per navigare
     _btn_href = f"?act={act_id}"
 
@@ -1683,9 +1716,9 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
   {_header_html}
   <div class="act-title">{s["icon"]} {str(row_data["name"])}</div>
   <div class="act-meta">{_date} &middot;
-    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>
+    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_micro_html}
   </div>
-  <div class="act-pills" style="margin-top:6px">{_pills}</div>
+  <div class="act-pills" style="margin-top:6px;margin-bottom:36px">{_pills}</div>
   <a class="det-btn" href="{_btn_href}"
      onclick="actGo(event,'{act_id}')">🔍 Dettaglio</a>
 </div>
