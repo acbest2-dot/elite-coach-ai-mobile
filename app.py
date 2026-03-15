@@ -121,250 +121,242 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
 <style>
-  /* Reset e base mobile */
+  /* ── PALETTE PREMIUM ── */
+  :root {
+    --navy:   #0F2744;
+    --blue:   #1A56DB;
+    --blue2:  #1E40AF;
+    --accent: #F97316;
+    --green:  #16A34A;
+    --red:    #DC2626;
+    --amber:  #D97706;
+    --gray50: #F8FAFC;
+    --gray100:#F1F5F9;
+    --gray200:#E2E8F0;
+    --gray400:#94A3B8;
+    --gray700:#334155;
+    --gray900:#0F172A;
+  }
+
+  /* ── RESET ── */
   * { box-sizing: border-box; }
   html, body, [data-testid="stAppViewContainer"] {
-      background: #f0f2f6;
+      background: var(--gray100) !important;
   }
-  /* Nascondi sidebar toggle su mobile */
   [data-testid="collapsedControl"] { display: none !important; }
-  section[data-testid="stSidebar"] { display: none !important; }
+  section[data-testid="stSidebar"]  { display: none !important; }
 
-  /* Padding per contenuto — spazio in basso per nav bar */
+  /* ── FADE-IN su ogni cambio pagina ── */
   .block-container {
-      padding: 0 0 120px 0 !important;
+      padding: 0 0 130px 0 !important;
       max-width: 100% !important;
+      animation: fadeInPage 0.25s ease-out;
+  }
+  @keyframes fadeInPage {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0);   }
   }
 
-  /* Nascondi toolbar Streamlit che overlappa la nav su mobile */
-  [data-testid="stToolbar"] { display: none !important; }
-  [data-testid="stDecoration"] { display: none !important; }
-  [data-testid="stStatusWidget"] { display: none !important; }
-  .stDeployButton { display: none !important; }
+  /* ── TOOLBAR HIDE ── */
+  [data-testid="stToolbar"],
+  [data-testid="stDecoration"],
+  [data-testid="stStatusWidget"],
+  .stDeployButton,
+  #MainMenu, footer, header { display: none !important; visibility: hidden !important; }
 
-  /* Header app */
+  /* ── HEADER PREMIUM con foto ── */
   .mob-header {
-      background: linear-gradient(135deg, #1565C0, #0D47A1);
+      background: linear-gradient(135deg, var(--navy) 0%, var(--blue2) 100%);
       color: white;
-      padding: 14px 20px 10px;
+      padding: 14px 16px 12px;
       margin-bottom: 0;
       position: sticky;
-      top: 52px;
+      top: 0;
       z-index: 998;
+      box-shadow: 0 2px 12px rgba(15,39,68,0.25);
   }
   .mob-header h1 {
-      font-size: 20px;
-      font-weight: 800;
-      margin: 0;
-      letter-spacing: -0.3px;
+      font-size: 18px; font-weight: 800;
+      margin: 0; letter-spacing: -0.3px;
   }
   .mob-header p {
-      font-size: 12px;
-      opacity: 0.8;
-      margin: 2px 0 0;
+      font-size: 12px; opacity: 0.75; margin: 2px 0 0;
   }
 
-  /* Card generica */
+  /* ── HERO CARD ── */
+  .hero-card {
+      background: linear-gradient(145deg, var(--navy) 0%, #1e3a5f 100%);
+      border-radius: 20px;
+      padding: 20px 16px 16px;
+      margin: 12px 12px 0;
+      box-shadow: 0 8px 32px rgba(15,39,68,0.22);
+      position: relative;
+      overflow: hidden;
+  }
+  .hero-card::before {
+      content: "";
+      position: absolute;
+      top: -40px; right: -40px;
+      width: 140px; height: 140px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.04);
+  }
+  .hero-card::after {
+      content: "";
+      position: absolute;
+      bottom: -20px; left: 40px;
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.03);
+  }
+
+  /* ── CARD GENERICA ── */
   .mob-card {
       background: #ffffff;
-      border-radius: 16px;
+      border-radius: 18px;
       padding: 16px;
-      margin: 12px 12px 0;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      margin: 10px 12px 0;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
   }
   .mob-card-title {
-      font-size: 12px;
-      font-weight: 700;
-      color: #888;
+      font-size: 11px; font-weight: 700;
+      color: var(--gray400);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
+      letter-spacing: 0.6px;
+      margin-bottom: 10px;
   }
 
-  /* Metriche grandi */
-  .big-metric {
-      text-align: center;
-      padding: 8px;
-  }
-  .big-metric .val {
-      font-size: 36px;
-      font-weight: 900;
-      line-height: 1;
-  }
-  .big-metric .lbl {
-      font-size: 11px;
-      color: #888;
-      font-weight: 600;
-      margin-top: 2px;
-  }
+  /* ── METRICHE ── */
+  .big-metric { text-align: center; padding: 8px; }
+  .big-metric .val { font-size: 36px; font-weight: 900; line-height: 1; }
+  .big-metric .lbl { font-size: 11px; color: var(--gray400); font-weight: 600; margin-top: 2px; }
 
-
-  /* Attività card mobile — bordo visibile su tutti i lati */
+  /* ── ATTIVITÀ CARD con sfondo sport ── */
   .act-card {
-      background: #fff;
-      border-radius: 14px;
-      padding: 12px 14px 12px;
+      border-radius: 16px;
+      padding: 13px 14px 12px;
       margin: 8px 12px 0;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.07);
       border-left: 4px solid #ccc;
-      border-top: 1px solid #e2e2e2;
-      border-right: 1px solid #e2e2e2;
-      border-bottom: 1px solid #e2e2e2;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+  }
+  /* Sfondo tenue per sport */
+  .act-card.sport-run     { background: linear-gradient(135deg, #fff 60%, #fff5f5); border-left-color: #EF4444; }
+  .act-card.sport-bike    { background: linear-gradient(135deg, #fff 60%, #eff6ff); border-left-color: #3B82F6; }
+  .act-card.sport-ski     { background: linear-gradient(135deg, #fff 60%, #f0f9ff); border-left-color: #0EA5E9; }
+  .act-card.sport-hike    { background: linear-gradient(135deg, #fff 60%, #f0fdf4); border-left-color: #22C55E; }
+  .act-card.sport-other   { background: linear-gradient(135deg, #fff 60%, #fafafa); border-left-color: #94A3B8; }
+
+  /* TSS progress bar */
+  .tss-bar-wrap {
+      margin-top: 8px;
+      height: 4px;
+      background: var(--gray200);
+      border-radius: 4px;
+      overflow: hidden;
+  }
+  .tss-bar-fill {
+      height: 4px;
+      border-radius: 4px;
+      transition: width 0.4s ease;
   }
 
-  /* Wrapper card + bottone 🔍 — bottone piccolo tondo a destra */
-  .act-card {
-      margin-bottom: 0 !important;
-      border-radius: 14px 14px 0 0 !important;
-  }
-  /* Riga con bottone 🔍 sotto la card */
-  div[data-testid="stHorizontalBlock"]:has(> div:first-child:empty) + div,
-  .act-card + div { margin-top: 0 !important; }
+  .act-card-btn-row { margin: 0 12px 0; }
 
-  /* CSS per il bottone 🔍 piccolo */
-  .det-btn-row > div:last-child button {
-      border-radius: 20px !important;
-      padding: 4px 10px !important;
-      font-size: 16px !important;
-      min-height: 32px !important;
-      height: 32px !important;
-      background: #E8F4FD !important;
-      color: #1565C0 !important;
-      border: 1px solid #b3d9f7 !important;
-  }
+  .act-title { font-size: 15px; font-weight: 700; color: var(--gray900); margin-bottom: 3px; }
+  .act-meta  { font-size: 11px; color: var(--gray400); margin-bottom: 7px; }
 
-  .act-title {
-      font-size: 15px;
-      font-weight: 700;
-      color: #1a1a1a;
-      margin-bottom: 4px;
-  }
-  .act-meta {
-      font-size: 12px;
-      color: #777;
-      margin-bottom: 8px;
-  }
-  .act-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-  }
+  .act-pills { display: flex; flex-wrap: wrap; gap: 5px; }
   .act-pill {
-      background: #f5f5f5;
+      background: var(--gray100);
       border-radius: 20px;
-      padding: 4px 10px;
-      font-size: 12px;
-      color: #333;
+      padding: 3px 9px;
+      font-size: 11px;
+      color: var(--gray700);
       font-weight: 500;
   }
-  .act-pill b { color: #333; }  /* era #e94560 (rosso) → nero */
+  .act-pill b { color: var(--gray900); }
 
-  /* Zone badge */
   .zone-chip {
       display: inline-block;
       border-radius: 20px;
-      padding: 2px 10px;
-      font-size: 11px;
+      padding: 2px 9px;
+      font-size: 10px;
       font-weight: 700;
   }
 
-  /* AI box */
+  /* ── AI BOX ── */
   .ai-box {
-      background: #f8f9fa;
-      border-left: 4px solid #2196F3;
-      border-radius: 0 12px 12px 0;
+      background: var(--gray50);
+      border-left: 3px solid var(--blue);
+      border-radius: 0 14px 14px 0;
       padding: 14px 16px;
       margin: 8px 12px;
-      color: #212529;
-      font-size: 15px;
+      color: var(--gray900);
+      font-size: 14px;
       line-height: 1.75;
   }
 
-  /* Chat bubbles */
+  /* ── CHAT BUBBLES ── */
   .chat-user {
-      background: #1565C0;
+      background: linear-gradient(135deg, var(--blue) 0%, var(--blue2) 100%);
       color: white;
       border-radius: 18px 18px 4px 18px;
       padding: 10px 14px;
-      margin: 4px 12px 4px 48px;
-      font-size: 14px;
-      line-height: 1.5;
+      margin: 4px 12px 4px 52px;
+      font-size: 14px; line-height: 1.5;
+      box-shadow: 0 2px 8px rgba(26,86,219,0.25);
   }
   .chat-ai {
       background: #ffffff;
-      color: #1a1a1a;
+      color: var(--gray900);
       border-radius: 18px 18px 18px 4px;
       padding: 10px 14px;
-      margin: 4px 48px 4px 12px;
-      font-size: 14px;
-      line-height: 1.5;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      margin: 4px 52px 4px 12px;
+      font-size: 14px; line-height: 1.5;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.08);
   }
-  .chat-label {
-      font-size: 10px;
-      color: #999;
-      margin: 0 12px 2px;
-      font-weight: 600;
-  }
+  .chat-label { font-size: 10px; color: var(--gray400); margin: 0 12px 2px; font-weight: 600; }
 
-  /* Buttons grandi touch-friendly */
+  /* ── BUTTONS ── */
   div[data-testid="stButton"] > button {
-      min-height: 48px !important;
-      font-size: 15px !important;
+      min-height: 46px !important;
+      font-size: 14px !important;
       border-radius: 12px !important;
       font-weight: 600 !important;
+      transition: transform 0.1s, box-shadow 0.1s !important;
+  }
+  div[data-testid="stButton"] > button:active {
+      transform: scale(0.97) !important;
+  }
+  div[data-testid="stButton"] > button[kind="primary"] {
+      background: linear-gradient(135deg, var(--blue) 0%, var(--blue2) 100%) !important;
+      border: none !important;
+      box-shadow: 0 4px 12px rgba(26,86,219,0.30) !important;
   }
 
-  /* Input touch-friendly */
+  /* ── INPUTS ── */
   div[data-testid="stTextInput"] input,
   div[data-testid="stChatInput"] textarea {
-      font-size: 16px !important;
-      min-height: 48px !important;
+      font-size: 16px !important; min-height: 48px !important;
+      border-radius: 12px !important;
   }
-
-  /* Slider touch */
   div[data-testid="stSlider"] { padding: 0 12px; }
 
-  /* Section padding */
+  /* ── MISC ── */
   .sec-pad { padding: 0 12px; }
-
-  /* Divider sottile */
-  .mob-divider {
-      height: 1px;
-      background: #eeeeee;
-      margin: 12px;
-  }
-
-  /* Status badge */
+  .mob-divider { height: 1px; background: var(--gray200); margin: 12px; }
   .status-badge {
-      display: inline-block;
-      border-radius: 20px;
-      padding: 4px 14px;
-      font-size: 13px;
-      font-weight: 700;
+      display: inline-block; border-radius: 20px;
+      padding: 4px 14px; font-size: 13px; font-weight: 700;
   }
-
-  /* Calendario mobile */
   .cal-day-act {
-      background: #fff;
-      border-radius: 10px;
-      padding: 4px 6px;
-      margin: 2px 0;
-      font-size: 11px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
+      background: #fff; border-radius: 10px;
+      padding: 4px 6px; margin: 2px 0;
+      font-size: 11px; display: flex; align-items: center; gap: 4px;
   }
-  .cal-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-  }
-
-  /* Hide streamlit branding */
-  #MainMenu { visibility: hidden; }
-  footer { visibility: hidden; }
-  header { visibility: hidden; }
+  .cal-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 </style>
 """, unsafe_allow_html=True)
 # fine CSS injection
@@ -2100,14 +2092,31 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         if _tag else ""
     )
 
+    # Classe CSS per sfondo sport
+    _sport_cls = {
+        "Run": "sport-run", "TrailRun": "sport-run",
+        "Ride": "sport-bike", "VirtualRide": "sport-bike", "MountainBikeRide": "sport-bike",
+        "BackcountrySki": "sport-ski", "AlpineSki": "sport-ski",
+        "Hike": "sport-hike",
+    }.get(_atype, "sport-other")
+
+    # Barra TSS — proporzionale al max TSS dell'atleta (stima 150 come riferimento alto)
+    _tss_pct = min(100, int(_tss_val / 150 * 100))
+    _tss_bar = (
+        f'<div class="tss-bar-wrap">'
+        f'<div class="tss-bar-fill" style="width:{_tss_pct}%;background:{_zc}"></div>'
+        f'</div>'
+    )
+
     card_html = f"""
-<div class="act-card" style="border-left-color:{_color}">
+<div class="act-card {_sport_cls}">
   {_header_html}
   <div class="act-title">{s["icon"]} {str(row_data["name"])}</div>
   <div class="act-meta">{_date} &middot;
     <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_tag_html}
   </div>
-  <div class="act-pills" style="margin-top:6px">{_pills}</div>
+  <div class="act-pills">{_pills}</div>
+  {_tss_bar}
 </div>
 """
     st.markdown(card_html, unsafe_allow_html=True)
@@ -2311,11 +2320,36 @@ last_act = df.iloc[-1]
 # ============================================================
 # HEADER
 # ============================================================
-athlete_name = athlete.get("firstname", "Atleta")
+athlete_name   = athlete.get("firstname", "Atleta")
+athlete_photo  = athlete.get("profile_medium") or athlete.get("profile", "")
+_initials      = (athlete.get("firstname","?")[:1] + athlete.get("lastname","?")[:1]).upper()
+
+# Foto o iniziali
+if athlete_photo and "avatar/athlete" not in athlete_photo:
+    _avatar_html = (
+        f'<img src="{athlete_photo}" style="width:38px;height:38px;border-radius:50%;'
+        f'object-fit:cover;border:2px solid rgba(255,255,255,0.4)">'
+    )
+else:
+    _avatar_html = (
+        f'<div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.2);'
+        f'display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;'
+        f'color:white;border:2px solid rgba(255,255,255,0.3)">{_initials}</div>'
+    )
+
 st.markdown(f"""
 <div class="mob-header">
-    <h1>🏆 Elite Coach</h1>
-    <p>Ciao {athlete_name} · {status_label}</p>
+  <div style="display:flex;align-items:center;gap:12px">
+    {_avatar_html}
+    <div style="flex:1;min-width:0">
+      <div style="font-size:11px;opacity:0.6;font-weight:600;letter-spacing:0.5px">ELITE COACH</div>
+      <div style="font-size:16px;font-weight:800;margin:1px 0">{athlete_name}</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:11px;opacity:0.6">Stato</div>
+      <div style="font-size:13px;font-weight:700">{status_label}</div>
+    </div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -2800,29 +2834,38 @@ if st.session_state.mob_menu == "dashboard":
 
     def _spark_card(val_str, label, sub, color, delta_html, svg):
         return (
-            f'<div style="flex:1;background:#f8f9fa;border-radius:14px;padding:12px 10px;'
-            f'border-top:3px solid {color};">' 
-            f'<div style="font-size:30px;font-weight:900;color:{color};line-height:1">{val_str}</div>'
-            f'<div style="font-size:11px;font-weight:700;color:#333;margin:3px 0 0">{label}</div>'
-            f'<div style="font-size:10px;color:#aaa;margin-bottom:6px">{sub}</div>'
-            f'<div style="line-height:0">{svg}</div>'
-            f'<div style="margin-top:4px">{delta_html} <span style="font-size:10px;color:#ccc">vs 7gg</span></div>'
+            f'<div style="flex:1;background:rgba(255,255,255,0.07);border-radius:14px;'
+            f'padding:12px 10px;border:1px solid rgba(255,255,255,0.12);">'
+            f'<div style="font-size:28px;font-weight:900;color:#fff;line-height:1">{val_str}</div>'
+            f'<div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);margin:3px 0 0">{label}</div>'
+            f'<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px">{sub}</div>'
+            f'<div style="line-height:0;opacity:0.7">{svg}</div>'
+            f'<div style="margin-top:4px">{delta_html} '
+            f'<span style="font-size:10px;color:rgba(255,255,255,0.3)">vs 7gg</span></div>'
             f'</div>'
         )
 
-    _card_ctl = _spark_card(f"{current_ctl:.0f}", "CTL", "Fitness cronico", ctl_color, _dh_ctl, _svg_ctl)
-    _card_tsb = _spark_card(f"{current_tsb:+.0f}", "TSB", "&gt;5 fresco", tsb_color, _dh_tsb, _svg_tsb)
-    _card_atl = _spark_card(f"{current_atl:.0f}", "ATL", "Fatica 7gg", atl_color, _dh_atl, _svg_atl)
+    _card_ctl = _spark_card(f"{current_ctl:.0f}", "CTL", "Fitness", ctl_color, _dh_ctl, _svg_ctl)
+    _card_tsb = _spark_card(f"{current_tsb:+.0f}", "TSB", "Forma", tsb_color, _dh_tsb, _svg_tsb)
+    _card_atl = _spark_card(f"{current_atl:.0f}", "ATL", "Fatica", atl_color, _dh_atl, _svg_atl)
 
     st.markdown(
-        '<div class="mob-card">' +
-        f'<div class="mob-card-title">&#128200; Stato Forma &middot; {status_label}</div>' +
-        '<div style="display:flex;gap:8px;margin:8px 0">' +
-        _card_ctl + _card_tsb + _card_atl +
-        '</div>' +
-        f'<div style="font-size:11px;color:#aaa;text-align:center;padding:2px 0">'
-        f'TSS 7gg: <b style="color:#555">{_tss7}</b> &middot; sessioni: <b style="color:#555">{_n7}</b>'
-        f'</div></div>',
+        f'<div class="hero-card">'
+        f'<div style="font-size:11px;color:rgba(255,255,255,0.5);font-weight:700;'
+        f'letter-spacing:0.6px;text-transform:uppercase;margin-bottom:12px">'
+        f'📈 Performance Management</div>'
+        f'<div style="display:flex;gap:8px;margin-bottom:12px">'
+        + _card_ctl + _card_tsb + _card_atl +
+        f'</div>'
+        f'<div style="display:flex;justify-content:space-between;align-items:center">'
+        f'<div style="font-size:12px;color:rgba(255,255,255,0.45)">'
+        f'TSS 7gg: <span style="color:rgba(255,255,255,0.8);font-weight:700">{_tss7}</span>'
+        f' · sessioni: <span style="color:rgba(255,255,255,0.8);font-weight:700">{_n7}</span></div>'
+        f'<div style="background:rgba(255,255,255,0.12);border-radius:20px;'
+        f'padding:4px 12px;font-size:12px;font-weight:700;color:rgba(255,255,255,0.9)">'
+        f'{status_label}</div>'
+        f'</div>'
+        f'</div>',
         unsafe_allow_html=True
     )
 
