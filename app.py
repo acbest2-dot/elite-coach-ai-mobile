@@ -132,9 +132,9 @@ if not st.session_state.get("_css_injected"):
   [data-testid="collapsedControl"] { display: none !important; }
   section[data-testid="stSidebar"] { display: none !important; }
 
-  /* Padding ridotto per mobile */
+  /* Padding per nav bar in alto */
   .block-container {
-      padding: 0 0 100px 0 !important;
+      padding: 60px 0 20px 0 !important;
       max-width: 100% !important;
   }
 
@@ -142,11 +142,11 @@ if not st.session_state.get("_css_injected"):
   .mob-header {
       background: linear-gradient(135deg, #1565C0, #0D47A1);
       color: white;
-      padding: 16px 20px 12px;
+      padding: 12px 20px 10px;
       margin-bottom: 0;
       position: sticky;
-      top: 0;
-      z-index: 999;
+      top: 52px;
+      z-index: 998;
   }
   .mob-header h1 {
       font-size: 20px;
@@ -1600,14 +1600,14 @@ def render_bottom_nav():
 <style>
 .bottom-nav-bar {{
     position: fixed;
-    bottom: 0; left: 0; right: 0;
-    height: 56px;
+    top: 0; left: 0; right: 0;
+    height: 52px;
     background: #ffffff;
-    border-top: 1.5px solid #e8e8e8;
-    box-shadow: 0 -2px 16px rgba(0,0,0,0.09);
+    border-bottom: 1.5px solid #e8e8e8;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     display: flex;
     z-index: 99999;
-    padding: 0 4px 6px;
+    padding: 4px 6px 4px;
 }}
 .nav-tab {{
     flex: 1;
@@ -1616,7 +1616,6 @@ def render_bottom_nav():
     justify-content: center;
     text-decoration: none;
     border-radius: 10px;
-    margin: 4px 2px 0;
     transition: background 0.12s;
     -webkit-tap-highlight-color: transparent;
 }}
@@ -1694,76 +1693,6 @@ function actGo(e, id) {{
 </script>
 """
     st.markdown(card_html, unsafe_allow_html=True)
-    """
-    Bottom nav 100% HTML+JS puro — funziona su desktop e mobile Chrome/Safari.
-    Usa window.location per cambiare il query param ?nav=X che Streamlit legge.
-    Nessun bottone Streamlit — zero problemi di layout verticale.
-    """
-    cur = st.session_state.mob_menu
-
-    # Leggi il nav param dalla URL (se presente)
-    _nav_param = st.query_params.get("nav", "")
-    if _nav_param and _nav_param != cur:
-        # Aggiorna la sessione e resetta il param
-        valid_keys = [k for k, _, _ in NAV_ITEMS]
-        if _nav_param in valid_keys:
-            st.session_state.mob_menu = _nav_param
-            st.session_state.selected_act_id = None
-            st.query_params.clear()
-            st.rerun()
-
-    # Costruisci i tab HTML
-    _tabs_html = ""
-    for key, icon, label in NAV_ITEMS:
-        _active = "nav-active" if cur == key else ""
-        _tabs_html += (
-            f'<a class="nav-tab {_active}" href="?nav={key}" '
-            f'onclick="navGo(event,\'{key}\')" title="{label}">'
-            f'<span class="nav-icon">{icon}</span>'
-            f'</a>'
-        )
-
-    st.markdown(f"""
-<style>
-.bottom-nav-bar {{
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    height: 56px;
-    background: #ffffff;
-    border-top: 1.5px solid #e8e8e8;
-    box-shadow: 0 -2px 16px rgba(0,0,0,0.09);
-    display: flex;
-    z-index: 99999;
-    padding: 0 4px 6px;
-}}
-.nav-tab {{
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    border-radius: 10px;
-    margin: 4px 2px 0;
-    transition: background 0.12s;
-    -webkit-tap-highlight-color: transparent;
-}}
-.nav-tab:hover {{ background: #f0f0f0; }}
-.nav-active {{ background: #E3F2FD !important; }}
-.nav-icon {{ font-size: 22px; line-height: 1; }}
-/* Spazio in fondo al contenuto per non coprirlo */
-.block-container {{ padding-bottom: 70px !important; }}
-</style>
-<div class="bottom-nav-bar">{_tabs_html}</div>
-<script>
-function navGo(e, key) {{
-    e.preventDefault();
-    // Setta il query param e ricarica Streamlit
-    const url = new URL(window.location.href);
-    url.searchParams.set('nav', key);
-    window.location.href = url.toString();
-}}
-</script>
-""", unsafe_allow_html=True)
 
 # ============================================================
 # LOGIN PAGE
@@ -2553,7 +2482,7 @@ if st.session_state.mob_menu == "dashboard":
                         key_prefix="dash5")
 
         # Solo prima attività: mappa + AI
-        if _is_first:
+        if _i5 == 0:
             _poly5 = _get_polyline(_row5) if "_get_polyline" in dir() else None
             if _poly5 is None:
                 # Fallback inline se _get_polyline non ancora definita
