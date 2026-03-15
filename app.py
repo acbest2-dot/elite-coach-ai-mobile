@@ -1581,7 +1581,6 @@ def render_bottom_nav():
 
     st.markdown("""
 <style>
-/* Fissa il wrapper in basso */
 #nav-radio-wrap {
     position: fixed !important;
     bottom: 0 !important;
@@ -1593,50 +1592,42 @@ def render_bottom_nav():
     box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
     padding: 6px 8px 10px !important;
 }
-/* Nascondi cerchietto radio — tutti i selettori possibili */
-#nav-radio-wrap input[type="radio"],
-#nav-radio-wrap [data-baseweb="radio"] > div:first-child,
-#nav-radio-wrap [data-testid="stRadio"] input,
-#nav-radio-wrap span[data-testid="stWidgetLabel"] { 
-    display: none !important; 
-    width: 0 !important;
-    height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-/* Layout riga radio */
 #nav-radio-wrap [data-testid="stRadio"] > div {
     gap: 4px !important;
     flex-wrap: nowrap !important;
     width: 100% !important;
 }
-/* Ogni opzione */
 #nav-radio-wrap [data-testid="stRadio"] label {
     flex: 1 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    font-size: 26px !important;
-    padding: 4px 0 !important;
+    padding: 6px 0 !important;
     border-radius: 10px !important;
-    min-width: 0 !important;
     cursor: pointer !important;
-    gap: 0 !important;
+    min-width: 0 !important;
 }
-/* Icona attiva */
 #nav-radio-wrap [data-testid="stRadio"] label:has(input:checked) {
     background: #E3F2FD !important;
 }
-/* Testo emoji dentro il label */
+/* Nasconde il cerchietto — primo div dentro label */
+#nav-radio-wrap [data-testid="stRadio"] label > div:first-child {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
 #nav-radio-wrap [data-testid="stRadio"] label p {
     font-size: 26px !important;
     line-height: 1 !important;
     margin: 0 !important;
 }
-/* Nascondi titolo widget */
 #nav-radio-wrap [data-testid="stRadio"] > label,
-#nav-radio-wrap .st-emotion-cache-ue6h4q { display: none !important; }
-/* Spazio in fondo al contenuto */
+#nav-radio-wrap [data-testid="stWidgetLabel"] { 
+    display: none !important; 
+}
 .block-container { padding-bottom: 80px !important; }
 </style>
 """, unsafe_allow_html=True)
