@@ -1731,19 +1731,59 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         _pills += f'<span class="act-pill">🔥 <b>{m["cals"]}</b></span>'
     _pills += f'<span class="act-pill">TSS <b>{row_data["tss"]:.0f}</b></span>'
 
-    # Dato prestazione principale accanto alla zona — specifico per sport
-    _atype = row_data.get("type", "")
-    _perf_stat = ""
-    _watts_avg = row_data.get("average_watts")
-    if pd.notna(_watts_avg) and _watts_avg and float(_watts_avg) > 0 and _atype in ("Ride","VirtualRide","MountainBikeRide"):
-        # Bici con potenza → mostra W
-        _perf_stat = f'⚡ {float(_watts_avg):.0f}W'
-    elif m["pace_str"] != "—":
-        _perf_stat = m["pace_str"]
+    # Tag descrittivo deterministico — calcolato dai dati, niente AI
+    _atype    = row_data.get("type", "")
+    _dur_sec  = float(row_data.get("moving_time", 0) or 0)
+    _dur_h    = _dur_sec / 3600
+    _elev_raw = float(row_data.get("total_elevation_gain", 0) or 0)
+    _tss_val  = float(row_data.get("tss", 0) or 0)
+    _hr_avg_v = row_data.get("average_heartrate")
+    _fc_max   = u.get("fc_max", 190) if "u" in dir() else 190
+    _watts_v  = row_data.get("average_watts")
+    _ftp      = u.get("ftp", 200) if "u" in dir() else 200
+    _hr_pct   = (float(_hr_avg_v) / _fc_max) if pd.notna(_hr_avg_v) and _fc_max > 0 else None
+    _if_val   = (float(_watts_v) / _ftp) if pd.notna(_watts_v) and _watts_v and _ftp > 0 else None
 
-    _stat_html = (
-        f' &nbsp;<span style="font-size:11px;color:#555;font-weight:600">{_perf_stat}</span>'
-        if _perf_stat else ""
+    _tag = ""
+    _tag_color = "#888"
+
+    if _atype in ("AlpineSki",):
+        _tag = "Sci pista"
+        _tag_color = "#81D4FA"
+    elif _atype in ("BackcountrySki",):
+        if _elev_raw > 1500:  _tag, _tag_color = "Scialpinismo impegnativo", "#4FC3F7"
+        elif _elev_raw > 800: _tag, _tag_color = "Scialpinismo medio", "#4FC3F7"
+        else:                 _tag, _tag_color = "Scialpinismo facile", "#81D4FA"
+    elif _atype in ("Run", "TrailRun"):
+        if _hr_pct and _hr_pct < 0.65:   _tag, _tag_color = "Recupero", "#4CAF50"
+        elif _hr_pct and _hr_pct < 0.75: _tag, _tag_color = "Fondo Z2", "#8BC34A"
+        elif _tss_val > 120:              _tag, _tag_color = "Uscita dura", "#F44336"
+        elif _elev_raw > 1000:            _tag, _tag_color = "Trail montagna", "#FF7043"
+        elif _elev_raw > 400:             _tag, _tag_color = "Trail collinare", "#FF9800"
+        elif _dur_h > 1.8:               _tag, _tag_color = "Lungo", "#2196F3"
+        elif _hr_pct and _hr_pct > 0.88: _tag, _tag_color = "Ritmo soglia", "#FF5722"
+        else:                             _tag, _tag_color = "Corsa", "#FF4B4B"
+    elif _atype in ("Ride", "VirtualRide", "MountainBikeRide"):
+        if _if_val and _if_val > 0.90:   _tag, _tag_color = "Sforzo soglia", "#FF5722"
+        elif _if_val and _if_val < 0.65: _tag, _tag_color = "Recupero attivo", "#4CAF50"
+        elif _elev_raw > 2000:           _tag, _tag_color = "Gran fondo", "#9C27B0"
+        elif _elev_raw > 1000:           _tag, _tag_color = "Granfondo collinare", "#673AB7"
+        elif _dur_h > 3:                 _tag, _tag_color = "Lungo endurance", "#2196F3"
+        elif _tss_val > 100:             _tag, _tag_color = "Carico elevato", "#FF9800"
+        else:                            _tag, _tag_color = "Uscita base", "#42A5F5"
+    elif _atype in ("Hike",):
+        if _elev_raw > 1000: _tag, _tag_color = "Escursione alpina", "#4FC3F7"
+        elif _dur_h > 3:     _tag, _tag_color = "Escursione lunga", "#4CAF50"
+        else:                _tag, _tag_color = "Escursione", "#8BC34A"
+    elif _atype in ("Workout",):
+        if _tss_val > 80:  _tag, _tag_color = "Allenamento intenso", "#FF5722"
+        elif _dur_h > 1.2: _tag, _tag_color = "Allenamento lungo", "#FF9800"
+        else:              _tag, _tag_color = "Allenamento", "#FF9800"
+
+    _tag_html = (
+        f' &nbsp;<span style="background:{_tag_color}22;color:{_tag_color};'
+        f'border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700">{_tag}</span>'
+        if _tag else ""
     )
 
     card_html = f"""
@@ -1751,13 +1791,12 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
   {_header_html}
   <div class="act-title">{s["icon"]} {str(row_data["name"])}</div>
   <div class="act-meta">{_date} &middot;
-    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_stat_html}
+    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_tag_html}
   </div>
   <div class="act-pills" style="margin-top:6px">{_pills}</div>
 </div>
 """
     st.markdown(card_html, unsafe_allow_html=True)
-    # Bottone Streamlit — non causa session reset, bordi tondi, allineato a destra
     _cb1, _cb2 = st.columns([6, 1])
     with _cb2:
         if st.button("🔍", key=f"{key_prefix}_{act_id}", help="Apri dettaglio"):
