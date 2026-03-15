@@ -1569,79 +1569,64 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Nav radio orizzontale — fissa in basso, pallini nascosti."""
+    """Nav radio orizzontale — pallini nascosti, fissa in basso."""
     cur = st.session_state.mob_menu
 
     _options = [icon for _, icon, _ in NAV_ITEMS]
     _keys    = [key  for key, _, _ in NAV_ITEMS]
     _cur_idx = _keys.index(cur) if cur in _keys else 0
 
-    # Wrapper con ID univoco per scoping CSS preciso
-    st.markdown('<div id="nav-radio-wrap">', unsafe_allow_html=True)
-
     st.markdown("""
 <style>
-#nav-radio-wrap {
+[data-testid="stRadio"] {
     position: fixed !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
+    bottom: 0 !important; left: 0 !important; right: 0 !important;
     z-index: 99999 !important;
-    background: #ffffff !important;
+    background: #fff !important;
     border-top: 1.5px solid #e8e8e8 !important;
     box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
     padding: 6px 8px 10px !important;
-}
-#nav-radio-wrap [data-testid="stRadio"] > div {
-    gap: 4px !important;
-    flex-wrap: nowrap !important;
-    width: 100% !important;
-}
-#nav-radio-wrap [data-testid="stRadio"] label {
-    flex: 1 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    padding: 6px 0 !important;
-    border-radius: 10px !important;
-    cursor: pointer !important;
-    min-width: 0 !important;
-}
-#nav-radio-wrap [data-testid="stRadio"] label:has(input:checked) {
-    background: #E3F2FD !important;
-}
-/* Nasconde il cerchietto — primo div dentro label */
-#nav-radio-wrap [data-testid="stRadio"] label > div:first-child {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
     margin: 0 !important;
-    padding: 0 !important;
+}
+[data-testid="stRadio"] > div {
+    gap: 4px !important; flex-wrap: nowrap !important; width: 100% !important;
+}
+[data-testid="stRadio"] label {
+    flex: 1 !important; display: flex !important;
+    align-items: center !important; justify-content: center !important;
+    padding: 6px 0 !important; border-radius: 10px !important;
+    cursor: pointer !important; min-width: 0 !important; gap: 0 !important;
+}
+[data-testid="stRadio"] label:has(input:checked) { background: #E3F2FD !important; }
+[data-testid="stRadio"] label p { font-size: 26px !important; line-height: 1 !important; margin: 0 !important; }
+/* Nascondi pallino — tutti i selettori */
+[data-testid="stRadio"] label > div:first-child,
+[data-testid="stRadio"] label > div:first-child *,
+[data-testid="stRadio"] [data-baseweb="radio"],
+[data-testid="stRadio"] [data-baseweb="radio"] > div,
+[data-testid="stRadio"] input[type="radio"],
+[data-testid="stRadio"] [class*="st-b"],
+[data-testid="stRadio"] [class*="st-c"] {
+    display: none !important; width: 0 !important; height: 0 !important;
+    min-width: 0 !important; margin: 0 !important; padding: 0 !important;
     overflow: hidden !important;
 }
-#nav-radio-wrap [data-testid="stRadio"] label p {
-    font-size: 26px !important;
-    line-height: 1 !important;
-    margin: 0 !important;
-}
-#nav-radio-wrap [data-testid="stRadio"] > label,
-#nav-radio-wrap [data-testid="stWidgetLabel"] { 
-    display: none !important; 
-}
+[data-testid="stRadio"] > label,
+[data-testid="stWidgetLabel"] { display: none !important; }
 .block-container { padding-bottom: 80px !important; }
 </style>
 """, unsafe_allow_html=True)
 
     _sel = st.radio(
-        "nav",
-        options=_options,
-        index=_cur_idx,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="nav_radio"
+        "nav", options=_options, index=_cur_idx,
+        horizontal=True, label_visibility="collapsed", key="nav_radio"
     )
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    _sel_key = _keys[_options.index(_sel)]
+    if _sel_key != cur:
+        st.session_state.mob_menu = _sel_key
+        st.session_state.selected_act_id = None
+        st.rerun()
 
     _sel_key = _keys[_options.index(_sel)]
     if _sel_key != cur:
@@ -1750,11 +1735,19 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         _pills += f'<span class="act-pill">🔥 <b>{m["cals"]}</b></span>'
     _pills += f'<span class="act-pill">TSS <b>{row_data["tss"]:.0f}</b></span>'
 
-    # Micro commento AI (cachato per act_id)
-    _micro = get_act_micro_comment(row_data, m, s)
-    _micro_html = (
-        f' &nbsp;<span style="font-size:11px;color:#555;font-style:italic">{_micro}</span>'
-        if _micro else ""
+    # Dato prestazione principale accanto alla zona — specifico per sport
+    _atype = row_data.get("type", "")
+    _perf_stat = ""
+    _watts_avg = row_data.get("average_watts")
+    if pd.notna(_watts_avg) and _watts_avg and float(_watts_avg) > 0 and _atype in ("Ride","VirtualRide","MountainBikeRide"):
+        # Bici con potenza → mostra W
+        _perf_stat = f'⚡ {float(_watts_avg):.0f}W'
+    elif m["pace_str"] != "—":
+        _perf_stat = m["pace_str"]
+
+    _stat_html = (
+        f' &nbsp;<span style="font-size:11px;color:#555;font-weight:600">{_perf_stat}</span>'
+        if _perf_stat else ""
     )
 
     card_html = f"""
@@ -1762,7 +1755,7 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
   {_header_html}
   <div class="act-title">{s["icon"]} {str(row_data["name"])}</div>
   <div class="act-meta">{_date} &middot;
-    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_micro_html}
+    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_stat_html}
   </div>
   <div class="act-pills" style="margin-top:6px">{_pills}</div>
 </div>
