@@ -1569,7 +1569,7 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Nav radio orizzontale — pallini nascosti, fissa in basso."""
+    """Nav radio orizzontale — fissa in basso con fascia bianca sotto."""
     cur = st.session_state.mob_menu
 
     _options = [icon for _, icon, _ in NAV_ITEMS]
@@ -1578,18 +1578,9 @@ def render_bottom_nav():
 
     st.markdown("""
 <style>
-/* Nascondi icone Streamlit in basso a destra su mobile */
-[data-testid="stToolbar"],
-[data-testid="stToolbarActions"],
-[data-testid="stDecoration"],
-[data-testid="stStatusWidget"],
-.stDeployButton,
-#MainMenu,
-footer { display: none !important; visibility: hidden !important; }
-
 [data-testid="stRadio"] {
     position: fixed !important;
-    bottom: 60px !important; left: 0 !important; right: 0 !important;
+    bottom: 50px !important; left: 0 !important; right: 0 !important;
     z-index: 99999 !important;
     background: #fff !important;
     border-top: 1.5px solid #e8e8e8 !important;
@@ -1609,7 +1600,6 @@ footer { display: none !important; visibility: hidden !important; }
 }
 [data-testid="stRadio"] label:has(input:checked) { background: #E3F2FD !important; }
 [data-testid="stRadio"] label p { font-size: 26px !important; line-height: 1 !important; margin: 0 !important; }
-/* Nascondi pallino */
 [data-testid="stRadio"] label > div:first-child,
 [data-testid="stRadio"] label > div:first-child *,
 [data-testid="stRadio"] input[type="radio"] {
@@ -1619,20 +1609,23 @@ footer { display: none !important; visibility: hidden !important; }
 }
 [data-testid="stRadio"] > label,
 [data-testid="stWidgetLabel"] { display: none !important; }
+/* Fascia bianca sotto la nav — copre il contenuto della pagina */
+.nav-cover-strip {
+    position: fixed !important;
+    bottom: 0 !important; left: 0 !important; right: 0 !important;
+    height: 50px !important;
+    background: #ffffff !important;
+    z-index: 99998 !important;
+}
 .block-container { padding-bottom: 130px !important; }
 </style>
+<div class="nav-cover-strip"></div>
 """, unsafe_allow_html=True)
 
     _sel = st.radio(
         "nav", options=_options, index=_cur_idx,
         horizontal=True, label_visibility="collapsed", key="nav_radio"
     )
-
-    _sel_key = _keys[_options.index(_sel)]
-    if _sel_key != cur:
-        st.session_state.mob_menu = _sel_key
-        st.session_state.selected_act_id = None
-        st.rerun()
 
     _sel_key = _keys[_options.index(_sel)]
     if _sel_key != cur:
@@ -2013,7 +2006,7 @@ st.markdown(f"""
 
 # Nav bar — chiamata subito dopo l'header così il CSS fixed è già iniettato
 # I bottoni vengono posizionati in fondo via CSS position:fixed
-render_bottom_nav()
+render_bottom_nav(status_label=status_label, current_ctl=current_ctl)
 
 # ============================================================
 # DETTAGLIO ATTIVITÀ (intercetta tutto)
