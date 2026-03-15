@@ -2006,7 +2006,7 @@ st.markdown(f"""
 
 # Nav bar — chiamata subito dopo l'header così il CSS fixed è già iniettato
 # I bottoni vengono posizionati in fondo via CSS position:fixed
-render_bottom_nav(status_label=status_label, current_ctl=current_ctl)
+render_bottom_nav()
 
 # ============================================================
 # DETTAGLIO ATTIVITÀ (intercetta tutto)
