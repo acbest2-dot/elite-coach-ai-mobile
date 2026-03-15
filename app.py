@@ -873,8 +873,9 @@ def fetch_athlete(access_token):
 # ============================================================
 # MAPPA 2D + 3D
 # ============================================================
-def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0, height=340) -> str:
-    """Mappa Mapbox 3D compatta per mobile con pulsante fullscreen."""
+def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0,
+                     dist_km=0, dur_str="", height=340) -> str:
+    """Mappa Mapbox 3D con fullscreen, layer switcher, pitch, fly-to e stats overlay."""
     if not encoded_polyline or not mapbox_token:
         return None
     try:
@@ -891,6 +892,9 @@ def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0,
         end_j   = _j.dumps(coords[-1])
         line_color = ("#FF4B4B" if sport_type in ("Run","TrailRun") else
                       "#4FC3F7" if sport_type in ("BackcountrySki","AlpineSki") else "#2196F3")
+        _dist_str = f"{dist_km:.1f} km" if dist_km else ""
+        _elev_str = f"{elev_gain:.0f} m D+" if elev_gain else ""
+
         html = f"""<!DOCTYPE html><html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -898,22 +902,69 @@ def build_map3d_html(encoded_polyline, mapbox_token, sport_type="", elev_gain=0,
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
-  html,body{{width:100%;height:{height}px;background:#000;overflow:hidden}}
+  html,body{{width:100%;height:{height}px;background:#000;overflow:hidden;font-family:-apple-system,sans-serif}}
   #map{{width:100%;height:100%}}
   .mapboxgl-ctrl-group{{background:rgba(0,0,0,0.5)!important;border:none!important}}
-  .mapboxgl-ctrl-group button{{background:rgba(255,255,255,0.15)!important;color:#fff!important}}
-  #fs-btn{{
+  .mapboxgl-ctrl-group button{{background:rgba(255,255,255,0.12)!important;color:#fff!important}}
+
+  /* Pannello controlli in basso a sinistra */
+  #ctrl-panel{{
     position:absolute;bottom:12px;left:12px;z-index:10;
-    background:rgba(0,0,0,0.6);color:#fff;border:1px solid rgba(255,255,255,0.3);
-    border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600;
-    cursor:pointer;backdrop-filter:blur(4px);transition:background 0.2s;
+    display:flex;flex-direction:column;gap:6px;
   }}
-  #fs-btn:hover{{background:rgba(21,101,192,0.8)}}
+  .ctrl-row{{display:flex;gap:6px;align-items:center}}
+  .ctrl-btn{{
+    background:rgba(0,0,0,0.65);color:#fff;border:1px solid rgba(255,255,255,0.25);
+    border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;
+    cursor:pointer;backdrop-filter:blur(6px);transition:background 0.15s;white-space:nowrap;
+  }}
+  .ctrl-btn:hover,.ctrl-btn.active{{background:rgba(21,101,192,0.85);border-color:#42A5F5}}
+  .ctrl-btn.sm{{padding:5px 8px;font-size:11px}}
+
+  /* Stats overlay in alto a sinistra */
+  #stats-overlay{{
+    position:absolute;top:10px;left:10px;z-index:10;
+    background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);
+    border-radius:10px;padding:8px 12px;color:#fff;
+    font-size:12px;line-height:1.6;border:1px solid rgba(255,255,255,0.15);
+    display:none;
+  }}
+  #stats-overlay.visible{{display:block}}
+  #stats-overlay b{{color:#64B5F6}}
+
+  /* Fullscreen */
   body.is-fullscreen{{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999}}
   body.is-fullscreen #map{{height:100vh}}
 </style></head><body>
 <div id="map"></div>
-<button id="fs-btn" onclick="toggleFS()">⛶ Schermo intero</button>
+
+<!-- Stats overlay -->
+<div id="stats-overlay">
+  {'<b>📏</b> ' + _dist_str + '<br>' if _dist_str else ''}{'<b>⛰</b> ' + _elev_str + '<br>' if _elev_str else ''}{'<b>⏱</b> ' + dur_str if dur_str else ''}
+</div>
+
+<!-- Pannello controlli -->
+<div id="ctrl-panel">
+  <!-- Riga 1: Layer switcher -->
+  <div class="ctrl-row">
+    <button class="ctrl-btn sm active" id="l-sat"   onclick="setLayer('satellite-streets-v12','l-sat')">🛰 Satellite</button>
+    <button class="ctrl-btn sm"        id="l-out"   onclick="setLayer('outdoors-v12','l-out')">🗺 Topo</button>
+    <button class="ctrl-btn sm"        id="l-dark"  onclick="setLayer('dark-v11','l-dark')">🌑 Dark</button>
+    <button class="ctrl-btn sm"        id="l-str"   onclick="setLayer('streets-v12','l-str')">🏙 Street</button>
+  </div>
+  <!-- Riga 2: Pitch + fly-to + stats + fullscreen -->
+  <div class="ctrl-row">
+    <button class="ctrl-btn sm" onclick="setPitch(0)"  title="Vista piatta">📐 0°</button>
+    <button class="ctrl-btn sm" onclick="setPitch(45)" title="Vista 45°">🏔 45°</button>
+    <button class="ctrl-btn sm" onclick="setPitch(70)" title="Vista immersiva">🎮 70°</button>
+    <button class="ctrl-btn sm" onclick="flyTo({start_j},'🟢')" title="Vai a partenza">🟢</button>
+    <button class="ctrl-btn sm" onclick="flyTo({end_j},'🔴')"   title="Vai ad arrivo">🔴</button>
+    <button class="ctrl-btn sm" onclick="fitRoute()"             title="Traccia intera">↔</button>
+    <button class="ctrl-btn sm" onclick="toggleStats()"          title="Statistiche">📊</button>
+    <button class="ctrl-btn sm" onclick="toggleFS()"  id="fs-btn">⛶</button>
+  </div>
+</div>
+
 <script>
 mapboxgl.accessToken = "{mapbox_token}";
 const map = new mapboxgl.Map({{
@@ -921,34 +972,74 @@ const map = new mapboxgl.Map({{
   center:[{clon},{clat}], zoom:12, pitch:55, bearing:0, antialias:true
 }});
 map.addControl(new mapboxgl.NavigationControl(),"top-right");
+
+const routeCoords = {_j.dumps(coords)};
+const bounds = routeCoords.reduce((b,c)=>b.extend(c), new mapboxgl.LngLatBounds(routeCoords[0],routeCoords[0]));
+
+function addRoute(){{
+  if(map.getSource("route")){{map.removeLayer("route-glow");map.removeLayer("route");map.removeSource("route");}}
+  map.addSource("route",{{type:"geojson",data:{geoj}}});
+  map.addLayer({{id:"route-glow",type:"line",source:"route",
+    layout:{{"line-join":"round","line-cap":"round"}},
+    paint:{{"line-color":"{line_color}","line-width":7,"line-opacity":0.3,"line-blur":5}}}});
+  map.addLayer({{id:"route",type:"line",source:"route",
+    layout:{{"line-join":"round","line-cap":"round"}},
+    paint:{{"line-color":"{line_color}","line-width":3.5,"line-opacity":0.95}}}});
+}}
+
 map.on("load",()=>{{
   map.addSource("dem",{{type:"raster-dem",url:"mapbox://mapbox.mapbox-terrain-dem-v1",tileSize:512}});
   map.setTerrain({{"source":"dem","exaggeration":1.5}});
   map.addLayer({{id:"sky",type:"sky",paint:{{"sky-type":"atmosphere","sky-atmosphere-sun":[0,60],"sky-atmosphere-sun-intensity":15}}}});
-  map.addSource("route",{{type:"geojson",data:{geoj}}});
-  map.addLayer({{id:"route-glow",type:"line",source:"route",
-    layout:{{"line-join":"round","line-cap":"round"}},
-    paint:{{"line-color":"{line_color}","line-width":6,"line-opacity":0.35,"line-blur":4}}}});
-  map.addLayer({{id:"route",type:"line",source:"route",
-    layout:{{"line-join":"round","line-cap":"round"}},
-    paint:{{"line-color":"{line_color}","line-width":3,"line-opacity":0.95}}}});
-  new mapboxgl.Marker({{color:"#4CAF50",scale:0.8}}).setLngLat({start_j}).addTo(map);
-  new mapboxgl.Marker({{color:"#F44336",scale:0.8}}).setLngLat({end_j}).addTo(map);
-  const coords={_j.dumps(coords)};
-  const bounds=coords.reduce((b,c)=>b.extend(c),new mapboxgl.LngLatBounds(coords[0],coords[0]));
-  map.fitBounds(bounds,{{padding:40,duration:0}});
+  addRoute();
+  new mapboxgl.Marker({{color:"#4CAF50",scale:0.9}}).setLngLat({start_j}).addTo(map);
+  new mapboxgl.Marker({{color:"#F44336",scale:0.9}}).setLngLat({end_j}).addTo(map);
+  map.fitBounds(bounds,{{padding:50,duration:800,pitch:55}});
 }});
+
+// Layer switcher
+var _layerBtns={{'l-sat':'satellite-streets-v12','l-out':'outdoors-v12','l-dark':'dark-v11','l-str':'streets-v12'}};
+var _curLayer='satellite-streets-v12';
+function setLayer(styleId, btnId){{
+  if(styleId===_curLayer) return;
+  _curLayer=styleId;
+  Object.keys(_layerBtns).forEach(id=>document.getElementById(id).classList.remove('active'));
+  document.getElementById(btnId).classList.add('active');
+  map.setStyle('mapbox://styles/mapbox/'+styleId);
+  map.once('style.load',()=>{{
+    try{{map.addSource("dem",{{type:"raster-dem",url:"mapbox://mapbox.mapbox-terrain-dem-v1",tileSize:512}});}}catch(e){{}}
+    try{{map.setTerrain({{"source":"dem","exaggeration":1.5}});}}catch(e){{}}
+    addRoute();
+  }});
+}}
+
+// Pitch control
+function setPitch(p){{map.easeTo({{pitch:p,duration:400}});}}
+
+// Fly-to
+function flyTo(lngLat, label){{map.flyTo({{center:lngLat,zoom:15,pitch:60,duration:1200}});}}
+
+// Fit route
+function fitRoute(){{map.fitBounds(bounds,{{padding:50,duration:800,pitch:55}});}}
+
+// Stats toggle
+function toggleStats(){{
+  var el=document.getElementById('stats-overlay');
+  el.classList.toggle('visible');
+}}
+
+// Fullscreen
 var _isFS=false;
 function toggleFS(){{
   _isFS=!_isFS;
+  var btn=document.getElementById('fs-btn');
   if(_isFS){{
     document.body.classList.add('is-fullscreen');
-    document.getElementById('fs-btn').textContent='✕ Esci da schermo intero';
-    // Prova Fullscreen API nativa
+    btn.textContent='✕';
     if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
   }} else {{
     document.body.classList.remove('is-fullscreen');
-    document.getElementById('fs-btn').textContent='⛶ Schermo intero';
+    btn.textContent='⛶';
     if(document.exitFullscreen) document.exitFullscreen();
   }}
   setTimeout(()=>map.resize(),200);
@@ -957,7 +1048,7 @@ document.addEventListener('fullscreenchange',()=>{{
   if(!document.fullscreenElement && _isFS){{
     _isFS=false;
     document.body.classList.remove('is-fullscreen');
-    document.getElementById('fs-btn').textContent='⛶ Schermo intero';
+    document.getElementById('fs-btn').textContent='⛶';
     setTimeout(()=>map.resize(),200);
   }}
 }});
@@ -1443,74 +1534,100 @@ NAV_ITEMS = [
 
 def render_bottom_nav():
     """
-    Bottom nav fissa — i bottoni Streamlit vengono posizionati in fondo via CSS fixed.
-    Va chiamata UNA SOLA VOLTA all'inizio, dopo l'header. Il CSS position:fixed li 
-    mantiene visibili indipendentemente dallo scroll.
+    Bottom nav fissa — solo icone, niente testo. Una sola chiamata in tutta l'app.
+    CSS position:fixed mantiene la barra visibile indipendentemente dallo scroll.
     """
     cur = st.session_state.mob_menu
 
-    # CSS iniettato subito — position:fixed è già attivo prima del rendering dei bottoni
-    st.markdown(f"""
-    <style>
-    /* Nav bar fissa — contenitore */
-    div[data-testid="stBottom"] > div {{
-        background: #ffffff !important;
-        border-top: 1px solid #e0e0e0 !important;
-        box-shadow: 0 -2px 16px rgba(0,0,0,0.10) !important;
-        padding: 4px 4px 8px !important;
-    }}
-    /* Fallback: ultimo stHorizontalBlock se stBottom non disponibile */
-    .nav-bar-fixed {{
-        position: fixed !important;
-        bottom: 0 !important; left: 0 !important; right: 0 !important;
-        z-index: 1000 !important;
-        background: #ffffff !important;
-        border-top: 1px solid #e0e0e0 !important;
-        box-shadow: 0 -2px 16px rgba(0,0,0,0.10) !important;
-        padding: 4px 4px 8px !important;
-        display: flex !important;
-        gap: 0 !important;
-    }}
-    .nav-bar-fixed > div {{
-        padding: 0 2px !important;
-        flex: 1 !important;
-    }}
-    </style>
-    <script>
-    (function fixNav() {{
-        function applyFix() {{
-            // Cerca tutti gli stHorizontalBlock con esattamente 5 bottoni nav
-            document.querySelectorAll('[data-testid="stHorizontalBlock"]').forEach(function(block) {{
-                var btns = block.querySelectorAll('button');
-                if (btns.length === 5 && btns[0] && btns[0].innerText.includes('\\n')) {{
-                    block.classList.add('nav-bar-fixed');
-                    // Stile bottoni
-                    btns.forEach(function(b) {{
-                        b.style.cssText = 'min-height:52px!important;height:52px!important;' +
-                            'border-radius:10px!important;font-size:11px!important;' +
-                            'font-weight:600!important;border:none!important;' +
-                            'white-space:pre-line!important;line-height:1.2!important;';
-                    }});
-                }}
-            }});
-        }}
-        // Applica subito e ogni volta che il DOM cambia
-        applyFix();
-        new MutationObserver(applyFix).observe(document.body, {{childList:true, subtree:true}});
-    }})();
-    </script>
-    """, unsafe_allow_html=True)
+    # CSS — iniettato solo se non già presente
+    if not st.session_state.get("_nav_css_injected"):
+        st.session_state["_nav_css_injected"] = True
+        st.markdown("""
+        <style>
+        /* Nav bar fissa in fondo */
+        .nav-bar-fixed {
+            position: fixed !important;
+            bottom: 0 !important; left: 0 !important; right: 0 !important;
+            z-index: 9999 !important;
+            background: #ffffff !important;
+            border-top: 1px solid #e8e8e8 !important;
+            box-shadow: 0 -2px 20px rgba(0,0,0,0.10) !important;
+            display: flex !important;
+            padding: 6px 8px 10px !important;
+            gap: 6px !important;
+        }
+        .nav-item-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 4px;
+            border-radius: 12px;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 22px;
+            line-height: 1;
+            transition: background 0.15s;
+        }
+        .nav-item-btn.active {
+            background: #E3F2FD;
+        }
+        .nav-item-btn:hover { background: #f0f0f0; }
+        </style>
+        """, unsafe_allow_html=True)
 
-    # Bottoni reali — l'unica cosa che Streamlit può cliccare
-    _btn_cols = st.columns(5)
+    # HTML decorativo fisso (solo visivo)
+    _items_html = ""
+    for key, icon, label in NAV_ITEMS:
+        _cls = "nav-item-btn active" if cur == key else "nav-item-btn"
+        _items_html += f'<div class="{_cls}" title="{label}">{icon}</div>'
+    st.markdown(f'<div class="nav-bar-fixed">{_items_html}</div>', unsafe_allow_html=True)
+
+    # Bottoni Streamlit trasparenti sovrapposti — unici elementi cliccabili
+    # Usiamo una riga di bottoni nascosti con CSS che li posiziona sopra la nav decorativa
+    _cols = st.columns(5)
     for i, (key, icon, label) in enumerate(NAV_ITEMS):
-        with _btn_cols[i]:
+        with _cols[i]:
             _t = "primary" if cur == key else "secondary"
-            if st.button(f"{icon}\n{label}", key=f"nav_btn_{key}",
-                         use_container_width=True, type=_t):
+            if st.button(icon, key=f"nav_btn_{key}", use_container_width=True, type=_t,
+                         help=label):
                 st.session_state.mob_menu = key
                 st.session_state.selected_act_id = None
                 st.rerun()
+
+    # CSS per rendere i bottoni Streamlit trasparenti e sovrapposti alla nav decorativa
+    st.markdown("""
+    <style>
+    /* Identifica la riga nav — deve essere l'ultimo stHorizontalBlock */
+    [data-testid="stHorizontalBlock"]:has(button[data-testid="baseButton-secondary"][title="Fitness"],
+                                          button[data-testid="baseButton-primary"][title="Fitness"],
+                                          button[data-testid="baseButton-secondary"][title="Home"],
+                                          button[data-testid="baseButton-primary"][title="Home"]) {
+        position: fixed !important;
+        bottom: 0 !important; left: 0 !important; right: 0 !important;
+        z-index: 10000 !important;
+        background: transparent !important;
+        padding: 6px 8px 10px !important;
+        gap: 6px !important;
+        pointer-events: none !important;
+    }
+    [data-testid="stHorizontalBlock"]:has(button[title="Fitness"]) > div,
+    [data-testid="stHorizontalBlock"]:has(button[title="Home"]) > div {
+        pointer-events: all !important;
+        padding: 0 !important;
+    }
+    [data-testid="stHorizontalBlock"]:has(button[title="Fitness"]) button,
+    [data-testid="stHorizontalBlock"]:has(button[title="Home"]) button {
+        opacity: 0 !important;
+        height: 52px !important;
+        min-height: 52px !important;
+        border: none !important;
+        border-radius: 12px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # ============================================================
 # LOGIN PAGE
@@ -1873,8 +1990,14 @@ if st.session_state.selected_act_id is not None:
                         st.info("❌ Errore nel rendering della mappa 2D.")
                 with _t3d:
                     _eg  = float(row.get("total_elevation_gain") or 0)
+                    if row.get("type") == "AlpineSki": _eg = 0
+                    _m_det = format_metrics(row)
                     _h3d = build_map3d_html(poly, MAPBOX_TOKEN,
-                                            sport_type=row.get("type",""), elev_gain=_eg, height=320)
+                                            sport_type=row.get("type",""),
+                                            elev_gain=_eg,
+                                            dist_km=_m_det["dist_km"],
+                                            dur_str=_m_det["dur_str"],
+                                            height=320)
                     if _h3d:
                         _components.html(_h3d, height=330, scrolling=False)
                     else:
@@ -2279,8 +2402,43 @@ if st.session_state.mob_menu == "dashboard":
                 st.markdown('</div></div>', unsafe_allow_html=True)
 
     # ── Ultime 5 attività ──
-    st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 4px;color:#1a1a1a">&#127885; Ultime attività</h4></div>',
+    st.markdown('<div class="sec-pad"><h4 style="margin:16px 0 8px;color:#1a1a1a">🏅 Ultime attività</h4></div>',
                 unsafe_allow_html=True)
+
+    # CSS per le card cliccabili con overlay trasparente
+    st.markdown("""
+    <style>
+    .clickable-card-wrap {
+        position: relative;
+        margin: 0 12px 10px;
+    }
+    .clickable-card-wrap .act-card {
+        margin: 0 !important;
+        border-radius: 14px !important;
+        cursor: pointer;
+        transition: box-shadow 0.15s, transform 0.1s;
+    }
+    .clickable-card-wrap .act-card:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.13) !important;
+        transform: translateY(-1px);
+    }
+    /* Bottone overlay trasparente sopra la card */
+    .clickable-card-wrap > div[data-testid="stButton"] {
+        position: absolute !important;
+        top: 0 !important; left: 0 !important;
+        width: 100% !important; height: 100% !important;
+        margin: 0 !important; padding: 0 !important;
+        z-index: 2 !important;
+    }
+    .clickable-card-wrap > div[data-testid="stButton"] > button {
+        width: 100% !important; height: 100% !important;
+        opacity: 0 !important;
+        border: none !important;
+        background: transparent !important;
+        cursor: pointer !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     _last5_df = df.iloc[-5:][::-1]
     for _i5, (_, _row5) in enumerate(_last5_df.iterrows()):
@@ -2290,41 +2448,45 @@ if st.session_state.mob_menu == "dashboard":
         _zn5, _zc5, _zl5 = get_zone_for_activity(_row5, u["fc_max"])
         _is_first = (_i5 == 0)
 
-        _title_html   = '<div class="mob-card-title">⏱ Ultima Attività</div>' if _is_first else ""
-        _name5        = str(_row5["name"])
-        _date5        = _row5["start_date"].strftime("%d %b %Y · %H:%M")
-        _icon5        = _s5["icon"]
-        _color5       = _s5["color"]
-        _dist5        = _m5["dist_str"]
-        _dur5         = _m5["dur_str"]
-        _pace5        = _m5["pace_str"]
-        _elev5        = _m5["elev"]
-        _hr5          = _m5["hr_avg"]
-        _tss5         = f"{_row5['tss']:.0f}"
+        _name5  = str(_row5["name"])
+        _date5  = _row5["start_date"].strftime("%d %b %Y · %H:%M")
+        _icon5  = _s5["icon"]
+        _color5 = _s5["color"]
+        _hr5    = _m5["hr_avg"]
+        _hrmax5 = _m5["hr_max"]
+        _tss5   = f"{_row5['tss']:.0f}"
+        _cals5  = _m5["cals"]
 
-        # Card con border-radius solo in alto — il bottone chiude in basso
+        # Pills: aggiungi FC max e calorie se disponibili
+        _pills = (
+            f'<span class="act-pill">📏 <b>{_m5["dist_str"]}</b></span>'
+            f'<span class="act-pill">⏱ <b>{_m5["dur_str"]}</b></span>'
+            f'<span class="act-pill">⚡ <b>{_m5["pace_str"]}</b></span>'
+            f'<span class="act-pill">⛰ <b>{_m5["elev"]}</b></span>'
+            f'<span class="act-pill">❤️ <b>{_hr5} bpm</b></span>'
+        )
+        if _hrmax5 != "—":
+            _pills += f'<span class="act-pill">💓 <b>{_hrmax5} bpm</b></span>'
+        if _cals5 != "—":
+            _pills += f'<span class="act-pill">🔥 <b>{_cals5}</b></span>'
+        _pills += f'<span class="act-pill">TSS <b>{_tss5}</b></span>'
+
+        # Wrapper position:relative per contenere il bottone overlay
+        st.markdown('<div class="clickable-card-wrap">', unsafe_allow_html=True)
         st.markdown(
-            f'<div class="act-card" style="border-left-color:{_color5};'
-            f'border-radius:14px 14px 0 0;margin-bottom:0">' +
-            _title_html +
-            f'<div class="act-title">{_icon5} {_name5}</div>'
+            f'<div class="act-card" style="border-left-color:{_color5}">'
+            + (f'<div class="mob-card-title">⏱ Ultima Attività</div>' if _is_first else "")
+            + f'<div class="act-title">{_icon5} {_name5}</div>'
             f'<div class="act-meta">{_date5} · '
             f'<span class="zone-chip" style="background:{_zc5}22;color:{_zc5}">{_zl5}</span></div>'
-            f'<div class="act-pills" style="margin-top:6px">'
-            f'<span class="act-pill">📏 <b>{_dist5}</b></span>'
-            f'<span class="act-pill">⏱ <b>{_dur5}</b></span>'
-            f'<span class="act-pill">⚡ <b>{_pace5}</b></span>'
-            f'<span class="act-pill">⛰ <b>{_elev5}</b></span>'
-            f'<span class="act-pill">❤️ <b>{_hr5} bpm</b></span>'
-            f'<span class="act-pill">TSS <b>{_tss5}</b></span>'
-            f'</div></div>',
+            f'<div class="act-pills" style="margin-top:6px">{_pills}</div>'
+            f'</div>',
             unsafe_allow_html=True)
-
-        # Bottone "Apri dettaglio" — visivamente cucito sotto la card
-        if st.button("Apri dettaglio →", key=f"dash5_{_id5}", use_container_width=True):
+        # Bottone trasparente sovrapposto — rende la card cliccabile
+        if st.button(" ", key=f"dash5_{_id5}", use_container_width=True):
             st.session_state.selected_act_id = _id5
             st.rerun()
-        st.markdown('<div style="margin-bottom:4px"></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
         # Solo prima attività: mappa + AI
         if _is_first:
@@ -2607,46 +2769,38 @@ elif st.session_state.mob_menu == "storico":
 
         cy, cm = st.session_state.cal_year, st.session_state.cal_month
 
-        # ── Selezione rapida anno ──
-        _years_avail = sorted(df["start_date"].dt.year.unique().tolist(), reverse=True)
-        st.markdown('<div class="sec-pad" style="margin-top:8px;margin-bottom:4px">'
-                    '<div style="font-size:11px;font-weight:700;color:#888;margin-bottom:6px">ANNO</div>'
-                    '<div style="display:flex;gap:6px;flex-wrap:wrap">',
-                    unsafe_allow_html=True)
-        _yr_cols = st.columns(len(_years_avail))
-        for _yi, _yr in enumerate(_years_avail):
-            with _yr_cols[_yi]:
-                _yr_active = "primary" if _yr == cy else "secondary"
-                if st.button(str(_yr), key=f"yr_{_yr}", use_container_width=True, type=_yr_active):
-                    st.session_state.cal_year  = _yr
-                    st.session_state.cal_month = 1
-                    st.rerun()
-        st.markdown('</div></div>', unsafe_allow_html=True)
-
-        # ── Selezione rapida mese — solo mesi con attività per l'anno selezionato ──
+        # ── Selettori anno/mese compatti in due colonne ──
+        _years_avail  = sorted(df["start_date"].dt.year.unique().tolist(), reverse=True)
+        _month_labels_full = ["","Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+                               "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
         _months_with_acts = sorted(
             df[df["start_date"].dt.year == cy]["start_date"].dt.month.unique().tolist()
         )
-        _month_labels = ["","Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"]
-        if _months_with_acts:
-            st.markdown('<div class="sec-pad" style="margin-bottom:8px">'
-                        '<div style="font-size:11px;font-weight:700;color:#888;margin-bottom:6px">MESE</div>'
-                        '<div style="display:flex;gap:6px;flex-wrap:wrap">',
-                        unsafe_allow_html=True)
-            _mo_cols = st.columns(len(_months_with_acts))
-            for _mi, _mo in enumerate(_months_with_acts):
-                with _mo_cols[_mi]:
-                    _mo_active = "primary" if _mo == cm else "secondary"
-                    if st.button(_month_labels[_mo], key=f"mo_{cy}_{_mo}",
-                                 use_container_width=True, type=_mo_active):
-                        st.session_state.cal_month = _mo
-                        st.rerun()
-            st.markdown('</div></div>', unsafe_allow_html=True)
-
-            # Se il mese corrente non ha attività in questo anno, vai al primo disponibile
-            if cm not in _months_with_acts:
-                cm = _months_with_acts[-1]
-                st.session_state.cal_month = cm
+        _sel_col1, _sel_col2 = st.columns(2)
+        with _sel_col1:
+            _yr_idx = _years_avail.index(cy) if cy in _years_avail else 0
+            _new_yr = st.selectbox("Anno", _years_avail, index=_yr_idx,
+                                   key="sel_year", label_visibility="collapsed")
+            if _new_yr != cy:
+                st.session_state.cal_year  = _new_yr
+                st.session_state.cal_month = (_months_with_acts[-1]
+                                               if _months_with_acts else 1)
+                st.rerun()
+        with _sel_col2:
+            if _months_with_acts:
+                # Se il mese corrente non esiste in questo anno → prendi l'ultimo disponibile
+                if cm not in _months_with_acts:
+                    cm = _months_with_acts[-1]
+                    st.session_state.cal_month = cm
+                _mo_options = _months_with_acts
+                _mo_labels  = [_month_labels_full[m] for m in _mo_options]
+                _mo_idx     = _mo_options.index(cm) if cm in _mo_options else len(_mo_options)-1
+                _new_mo_lbl = st.selectbox("Mese", _mo_labels, index=_mo_idx,
+                                            key="sel_month", label_visibility="collapsed")
+                _new_mo = _mo_options[_mo_labels.index(_new_mo_lbl)]
+                if _new_mo != cm:
+                    st.session_state.cal_month = _new_mo
+                    st.rerun()
 
         # Filtro ricerca nel calendario
         df_cal = df.copy()
@@ -2710,7 +2864,7 @@ elif st.session_state.mob_menu == "storico":
             row_html += '</div>'
             st.markdown(row_html, unsafe_allow_html=True)
 
-        # Lista attività del mese selezionato — schede ricche cliccabili
+        # Lista attività del mese selezionato — schede cliccabili con overlay
         if not month_acts.empty:
             st.markdown(
                 f'<div class="sec-pad" style="margin-top:8px">'
@@ -2724,33 +2878,35 @@ elif st.session_state.mob_menu == "storico":
                 m_   = format_metrics(row)
                 _id  = row.get("id", row.name)
                 _zn, _zc, _zl = get_zone_for_activity(row, u["fc_max"])
-                _hr  = m_["hr_avg"]
-                _tss = f"{row['tss']:.0f}"
-                _watts_str = f" · ⚡ {m_['watts']}" if m_["watts"] != "—" else ""
 
+                _pills_s = (
+                    f'<span class="act-pill">📏 <b>{m_["dist_str"]}</b></span>'
+                    f'<span class="act-pill">⏱ <b>{m_["dur_str"]}</b></span>'
+                    f'<span class="act-pill">⚡ <b>{m_["pace_str"]}</b></span>'
+                    f'<span class="act-pill">⛰ <b>{m_["elev"]}</b></span>'
+                    f'<span class="act-pill">❤️ <b>{m_["hr_avg"]} bpm</b></span>'
+                )
+                if m_["hr_max"] != "—":
+                    _pills_s += f'<span class="act-pill">💓 <b>{m_["hr_max"]} bpm</b></span>'
+                if m_["cals"] != "—":
+                    _pills_s += f'<span class="act-pill">🔥 <b>{m_["cals"]}</b></span>'
+                _pills_s += f'<span class="act-pill">TSS <b>{row["tss"]:.0f}</b></span>'
+
+                st.markdown('<div class="clickable-card-wrap">', unsafe_allow_html=True)
                 st.markdown(
-                    f'<div class="act-card" style="border-left-color:{s_["color"]};margin-bottom:0;border-radius:14px 14px 0 0">'
+                    f'<div class="act-card" style="border-left-color:{s_["color"]}">'
                     f'<div class="act-title">{s_["icon"]} {str(row["name"])}</div>'
                     f'<div class="act-meta">'
                     f'{row["start_date"].strftime("%d %b · %H:%M")} &middot; '
                     f'<span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>'
                     f'</div>'
-                    f'<div class="act-pills" style="margin-top:6px">'
-                    f'<span class="act-pill">📏 <b>{m_["dist_str"]}</b></span>'
-                    f'<span class="act-pill">⏱ <b>{m_["dur_str"]}</b></span>'
-                    f'<span class="act-pill">⚡ <b>{m_["pace_str"]}</b></span>'
-                    f'<span class="act-pill">⛰ <b>{m_["elev"]}</b></span>'
-                    f'<span class="act-pill">❤️ <b>{_hr} bpm</b></span>'
-                    f'<span class="act-pill">TSS <b>{_tss}</b></span>'
-                    f'</div>'
+                    f'<div class="act-pills" style="margin-top:6px">{_pills_s}</div>'
                     f'</div>',
                     unsafe_allow_html=True)
-                # Bottone che sembra la parte inferiore della card
-                if st.button("Dettaglio →", key=f"cal_det_{_id}", use_container_width=True):
+                if st.button(" ", key=f"cal_det_{_id}", use_container_width=True):
                     st.session_state.selected_act_id = _id
                     st.rerun()
-                # Spacer
-                st.markdown('<div style="margin-bottom:8px"></div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================
 # ── MENU: COACH CHAT ─────────────────────────────────────────
@@ -3076,6 +3232,4 @@ elif st.session_state.mob_menu == "profilo":
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================
-# BOTTOM NAV (sempre visibile)
-# ============================================================
-render_bottom_nav()
+# fine app
