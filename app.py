@@ -145,18 +145,15 @@ st.markdown("""
   }
   [data-testid="collapsedControl"] { display: none !important; }
   section[data-testid="stSidebar"]  { display: none !important; }
+  .block-container { padding: 0 0 130px 0 !important; max-width: 100% !important; }
 
-  /* ── FADE-IN — applicato al primo figlio del block-container ── */
-  .block-container {
-      padding: 0 0 130px 0 !important;
-      max-width: 100% !important;
-  }
-  /* Il div principale del contenuto Streamlit riceve il fade */
-  [data-testid="stVerticalBlock"] {
-      animation: fadeInPage 0.22s ease-out both;
+  /* ── FADE-IN — NON su stVerticalBlock (rompe position:fixed della nav) ── */
+  /* Applicato solo al mob-header che è il primo elemento visibile */
+  .mob-header {
+      animation: fadeInPage 0.2s ease-out both;
   }
   @keyframes fadeInPage {
-      from { opacity: 0; transform: translateY(5px); }
+      from { opacity: 0; transform: translateY(4px); }
       to   { opacity: 1; transform: translateY(0); }
   }
 
@@ -441,20 +438,6 @@ def get_zone_for_activity(row, fc_max):
 # ============================================================
 # TSS / FITNESS
 # ============================================================
-def calc_tss(row, u):
-    dur   = row["moving_time"] / 60
-    hr    = row["average_heartrate"] if pd.notna(row.get("average_heartrate")) else 0
-    watts = row["average_watts"]     if pd.notna(row.get("average_watts"))     else 0
-    ftp   = u.get("ftp", 200)
-    if hr > 0 and u["fc_max"] > u["fc_min"]:
-        intensity = (hr - u["fc_min"]) / (u["fc_max"] - u["fc_min"])
-        intensity = max(0.0, min(intensity, 1.0))
-        return (dur * hr * intensity) / (u["fc_max"] * 60) * 100
-    if watts > 0 and ftp > 0:
-        IF = watts / ftp
-        return (row["moving_time"] * watts * IF) / (ftp * 3600) * 100
-    return dur * 0.4
-
 def calc_tss_vectorized(df: pd.DataFrame, u: dict) -> pd.Series:
     """Calcola TSS per tutto il DataFrame in modo vettorizzato — molto più veloce di apply()."""
     fc_max = u["fc_max"]
@@ -520,11 +503,13 @@ def compute_fitness(df):
     ctl   = daily.ewm(span=42, adjust=False).mean()
     atl   = daily.ewm(span=7,  adjust=False).mean()
     tsb   = ctl - atl
-    df_dates   = df["start_date"].dt.date.map(lambda d: pd.Timestamp(d))
-    ctl_mapped = df_dates.map(ctl)
-    atl_mapped = df_dates.map(atl)
-    tsb_mapped = df_dates.map(tsb)
+    # Vettorizzato — evita il lambda per riga
+    df_ts     = pd.to_datetime(df["start_date"].dt.date.astype(str))
+    ctl_mapped = df_ts.map(ctl)
+    atl_mapped = df_ts.map(atl)
+    tsb_mapped = df_ts.map(tsb)
     return ctl_mapped, atl_mapped, tsb_mapped, ctl, atl, tsb, daily
+
 
 def calc_vo2max_estimate(df_sorted, ftp=200, peso=75):
     """
@@ -631,14 +616,17 @@ def _get_gsheet_client():
         return None, None
 
 def gsheet_load_activities() -> list:
-    """Carica attività dal Google Sheet. Ritorna lista di dict o []."""
+    """Carica attività dal Google Sheet. get_all_values è ~3x più veloce di get_all_records."""
     _, sheet = _get_gsheet_client()
     if sheet is None:
         return []
     try:
         ws = sheet.worksheet("activities")
-        records = ws.get_all_records()
-        return records
+        rows = ws.get_all_values()
+        if len(rows) < 2:
+            return []
+        headers = rows[0]
+        return [dict(zip(headers, row)) for row in rows[1:] if any(row)]
     except Exception:
         return []
 
@@ -1600,10 +1588,10 @@ if _act_param:
     # Non serve rerun — la pagina si renderizza con il nuovo selected_act_id
 
 def compute_fitness_by_sport(df: pd.DataFrame) -> dict:
-    """
-    Calcola CTL/ATL/TSB separati per corsa, bici e montagna.
-    Ritorna dict con chiavi 'run', 'bike', 'mountain', ognuna con (ctl, atl, tsb, ctl_daily).
-    """
+    """CTL/ATL/TSB per sport — cachata in session_state per df_cache_key."""
+    _cache_key = f"_sport_fitness_{st.session_state.get('_df_cache_key','')}"
+    if _cache_key in st.session_state:
+        return st.session_state[_cache_key]
     sport_groups = {
         "run":      df["type"].isin(["Run", "TrailRun"]),
         "bike":     df["type"].isin(["Ride", "VirtualRide", "MountainBikeRide"]),
@@ -1629,93 +1617,8 @@ def compute_fitness_by_sport(df: pd.DataFrame) -> dict:
             "label": labels[key],
             "n": len(sub),
         }
+    st.session_state[_cache_key] = result
     return result
-
-
-def get_proactive_alerts(df: pd.DataFrame, current_ctl: float, current_atl: float,
-                          current_tsb: float, u: dict) -> list:
-    """
-    Genera alert proattivi basati su regole deterministiche.
-    Ritorna lista di dict con: tipo (warning/info/success), titolo, messaggio.
-    """
-    alerts = []
-    now = df["start_date"].max()
-
-    # Giorni senza allenamento
-    last_act = df.iloc[-1]
-    days_off = (datetime.now() - last_act["start_date"]).days
-
-    # Trend CTL 14gg
-    df14 = df[df["start_date"] >= now - pd.Timedelta(days=14)]
-    ctl_delta = 0.0
-    if len(df14) >= 2:
-        ctl_delta = float(df14["ctl"].iloc[-1]) - float(df14["ctl"].iloc[0])
-
-    # TSS settimana corrente vs precedente
-    df_w0 = df[df["start_date"] >= now - pd.Timedelta(days=7)]
-    df_w1 = df[(df["start_date"] >= now - pd.Timedelta(days=14)) &
-               (df["start_date"] < now - pd.Timedelta(days=7))]
-    tss_w0 = df_w0["tss"].sum()
-    tss_w1 = df_w1["tss"].sum()
-    tss_drop_pct = ((tss_w1 - tss_w0) / tss_w1 * 100) if tss_w1 > 0 else 0
-
-    # ── Regole ──
-
-    # Fresco e fermo da 2+ giorni → ottimo momento per caricare
-    if current_tsb > 10 and days_off >= 2:
-        alerts.append({
-            "type": "success",
-            "icon": "🟢",
-            "title": f"Sei fresco (+{current_tsb:.0f} TSB) — {days_off} giorni di riposo",
-            "msg": "Condizione ideale per una sessione di qualità o di carico. Non aspettare troppo."
-        })
-
-    # Troppo riposo con forma alta → rischio de-training
-    if days_off >= 5 and current_ctl > 40:
-        alerts.append({
-            "type": "warning",
-            "icon": "⚠️",
-            "title": f"{days_off} giorni senza allenamento",
-            "msg": f"CTL attuale {current_ctl:.0f} — dopo 7+ giorni inizia il de-training. Anche 30 min aiutano."
-        })
-
-    # Sovraccarico: TSB molto negativo
-    if current_tsb < -25:
-        alerts.append({
-            "type": "warning",
-            "icon": "🔴",
-            "title": f"Sovraccarico: TSB {current_tsb:.0f}",
-            "msg": "Fatica accumulata alta. Priorità al recupero: sonno, alimentazione, sessione leggera al massimo."
-        })
-
-    # CTL in calo sostenuto
-    if ctl_delta < -5:
-        alerts.append({
-            "type": "info",
-            "icon": "📉",
-            "title": f"CTL calato di {abs(ctl_delta):.0f} punti in 14 giorni",
-            "msg": "Fase di scarico o pausa? Se involontario, valuta di aumentare gradualmente il volume."
-        })
-
-    # TSS settimana molto basso rispetto alla precedente
-    if tss_drop_pct > 40 and tss_w1 > 30:
-        alerts.append({
-            "type": "info",
-            "icon": "📊",
-            "title": f"Carico settimanale -{ tss_drop_pct:.0f}% vs settimana scorsa",
-            "msg": f"TSS questa settimana: {tss_w0:.0f} vs {tss_w1:.0f}. Settimana di scarico pianificata?"
-        })
-
-    # CTL in crescita rapida → rischio overtraining
-    if ctl_delta > 8:
-        alerts.append({
-            "type": "warning",
-            "icon": "📈",
-            "title": f"CTL cresciuto di {ctl_delta:.0f} punti in 14 giorni",
-            "msg": "Aumento rapido del carico. Regola empirica: non oltre +5-7 CTL/settimana per evitare infortuni."
-        })
-
-    return alerts
 
 
 def extract_and_update_memory(messages: list, memory: dict) -> dict:
@@ -2074,18 +1977,19 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         elif _dur_h > 1.2: _tag, _tag_color = "Allenamento lungo", "#FF9800"
         else:              _tag, _tag_color = "Allenamento", "#FF9800"
 
-    # Sfondo e bordo inline per sport — più affidabile di CSS classes con Streamlit
+    # Sfondo sport — colori pastello solidi, più visibili di linear-gradient
     _sport_styles = {
-        "Run":              ("linear-gradient(135deg,#fff 55%,#fff1f1)", "#EF4444"),
-        "TrailRun":         ("linear-gradient(135deg,#fff 55%,#fff4ee)", "#F97316"),
-        "Ride":             ("linear-gradient(135deg,#fff 55%,#eff6ff)", "#3B82F6"),
-        "VirtualRide":      ("linear-gradient(135deg,#fff 55%,#f0f4ff)", "#6366F1"),
-        "MountainBikeRide": ("linear-gradient(135deg,#fff 55%,#eef2ff)", "#4F46E5"),
-        "BackcountrySki":   ("linear-gradient(135deg,#fff 55%,#f0f9ff)", "#0EA5E9"),
-        "AlpineSki":        ("linear-gradient(135deg,#fff 55%,#f0f9ff)", "#38BDF8"),
-        "Hike":             ("linear-gradient(135deg,#fff 55%,#f0fdf4)", "#22C55E"),
+        "Run":              ("#FFF5F5", "#EF4444"),
+        "TrailRun":         ("#FFF4EE", "#F97316"),
+        "Ride":             ("#EFF6FF", "#3B82F6"),
+        "VirtualRide":      ("#F0F4FF", "#6366F1"),
+        "MountainBikeRide": ("#EEF2FF", "#4F46E5"),
+        "BackcountrySki":   ("#F0F9FF", "#0EA5E9"),
+        "AlpineSki":        ("#E0F2FE", "#38BDF8"),
+        "Hike":             ("#F0FDF4", "#22C55E"),
+        "Workout":          ("#FFF7ED", "#F97316"),
     }
-    _bg_style, _border_color = _sport_styles.get(_atype, ("#fff", "#94A3B8"))
+    _bg_color, _border_color = _sport_styles.get(_atype, ("#FAFAFA", "#94A3B8"))
 
     _tag_html = (
         f' &nbsp;<span style="background:{_tag_color}22;color:{_tag_color};'
@@ -2101,19 +2005,20 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         f'</div>'
     )
 
-    card_html = f"""
-<div class="act-card" style="background:{_bg_style};border-left-color:{_border_color}">
-  {_header_html}
-  <div class="act-title">{s["icon"]} {str(row_data["name"])}</div>
-  <div class="act-meta">{_date} &middot;
-    <span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_tag_html}
-  </div>
-  <div class="act-pills">{_pills}</div>
-  {_tss_bar}
-</div>
-"""
+    card_html = (
+        f'<div class="act-card" style="background:{_bg_color};border-left-color:{_border_color}">'
+        f'{_header_html}'
+        f'<div class="act-title">{s["icon"]} {str(row_data["name"])}</div>'
+        f'<div class="act-meta">{_date} &middot;'
+        f'<span class="zone-chip" style="background:{_zc}22;color:{_zc}">{_zl}</span>{_tag_html}'
+        f'</div>'
+        f'<div class="act-pills">{_pills}</div>'
+        f'{_tss_bar}'
+        f'</div>'
+    )
     st.markdown(card_html, unsafe_allow_html=True)
-    _cb1, _cb2 = st.columns([6, 1])
+    # Bottone in colonna piccola a destra
+    _, _cb2 = st.columns([7, 1])
     with _cb2:
         if st.button("🔍", key=f"{key_prefix}_{act_id}", help="Apri dettaglio"):
             st.session_state.selected_act_id = act_id
@@ -2895,27 +2800,6 @@ if st.session_state.mob_menu == "dashboard":
         unsafe_allow_html=True
     )
 
-    # ── Alert proattivi — stile toast ──
-    _alerts = get_proactive_alerts(df, current_ctl, current_atl, current_tsb, u)
-    _alert_cfg = {
-        "success": ("#F0FDF4", "#15803D", "#DCFCE7"),
-        "warning": ("#FFF7ED", "#C2410C", "#FED7AA"),
-        "info":    ("#EFF6FF", "#1D4ED8", "#DBEAFE"),
-    }
-    for _al in _alerts:
-        _bg, _tc, _ic_bg = _alert_cfg.get(_al["type"], _alert_cfg["info"])
-        st.markdown(
-            f'<div class="alert-toast" style="background:{_bg}">'
-            f'<div class="alert-toast-icon" style="background:{_ic_bg};'
-            f'width:40px;height:40px;border-radius:12px;display:flex;'
-            f'align-items:center;justify-content:center;font-size:20px;flex-shrink:0">'
-            f'{_al["icon"]}</div>'
-            f'<div>'
-            f'<div class="alert-toast-title" style="color:{_tc}">{_al["title"]}</div>'
-            f'<div class="alert-toast-msg" style="color:{_tc}">{_al["msg"]}</div>'
-            f'</div></div>',
-            unsafe_allow_html=True)
-
     _w7_metrics = [
         ("⏱", f"{_w7_hrs:.1f}h",         "ore attività",   "#3B82F6", "#EFF6FF"),
         ("📏", f"{_w7_km:.0f}",           "km totali",      "#10B981", "#ECFDF5"),
@@ -3546,12 +3430,14 @@ elif st.session_state.mob_menu == "chat":
 
         _memory = st.session_state.get("coach_memory", {})
 
-        # ── Contesto sistema con memoria ──
-        if "chat_ctx_cache" not in st.session_state:
+        # ── Contesto sistema con memoria — cachato per df_cache_key ──
+        _ctx_cache_key = f"chat_ctx_{st.session_state.get('_df_cache_key','')}"
+        if st.session_state.get("_chat_ctx_key") != _ctx_cache_key or "chat_ctx_cache" not in st.session_state:
             with st.spinner("📊 Carico contesto atleta..."):
                 st.session_state["chat_ctx_cache"] = build_chat_context(
                     df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val
                 )
+            st.session_state["_chat_ctx_key"] = _ctx_cache_key
 
         _memory_str = ""
         if _memory:
