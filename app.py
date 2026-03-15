@@ -233,17 +233,9 @@ st.markdown("""
       background: #fff;
       box-shadow: 0 1px 6px rgba(0,0,0,0.06);
   }
-
-  /* TSS progress bar */
-  .tss-bar-wrap {
-      margin-top: 8px; height: 4px;
-      background: var(--gray200); border-radius: 4px; overflow: hidden;
-  }
-  .tss-bar-fill { height: 4px; border-radius: 4px; }
-
   .act-title { font-size: 15px; font-weight: 700; color: var(--gray900); margin-bottom: 3px; }
   .act-meta  { font-size: 11px; color: var(--gray400); margin-bottom: 7px; }
-  .act-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+  .act-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .act-pill {
       background: var(--gray100); border-radius: 20px;
       padding: 3px 9px; font-size: 11px; color: var(--gray700); font-weight: 500;
@@ -253,19 +245,6 @@ st.markdown("""
       display: inline-block; border-radius: 20px;
       padding: 2px 9px; font-size: 10px; font-weight: 700;
   }
-
-  /* ── ALERT TOAST ── */
-  .alert-toast {
-      display: flex; align-items: flex-start; gap: 12px;
-      border-radius: 14px; padding: 12px 14px;
-      margin: 8px 12px 0;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  }
-  .alert-toast-icon {
-      font-size: 24px; line-height: 1; flex-shrink: 0; margin-top: 1px;
-  }
-  .alert-toast-title { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
-  .alert-toast-msg   { font-size: 12px; opacity: 0.85; line-height: 1.4; }
 
   /* ── BRIEFING AI — carta warm ── */
   .briefing-card {
@@ -1763,7 +1742,7 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Nav radio orizzontale — fissa in basso con fascia bianca sotto."""
+    """Nav radio orizzontale — fissa in basso. CSS scoped su #nav-radio-wrap."""
     cur = st.session_state.mob_menu
 
     _options = [icon for _, icon, _ in NAV_ITEMS]
@@ -1772,38 +1751,43 @@ def render_bottom_nav():
 
     st.markdown("""
 <style>
-[data-testid="stRadio"] {
+/* ── NAV WRAPPER fissato in basso ── */
+#nav-radio-wrap {
     position: fixed !important;
     bottom: 50px !important; left: 0 !important; right: 0 !important;
     z-index: 99999 !important;
-    background: #fff !important;
+    background: #ffffff !important;
     border-top: 1.5px solid #e8e8e8 !important;
     border-bottom: 1.5px solid #e8e8e8 !important;
     box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
     padding: 6px 8px !important;
-    margin: 0 !important;
 }
-[data-testid="stRadio"] > div {
+#nav-radio-wrap [data-testid="stRadio"] > div {
     gap: 4px !important; flex-wrap: nowrap !important; width: 100% !important;
+    display: flex !important;
 }
-[data-testid="stRadio"] label {
+#nav-radio-wrap [data-testid="stRadio"] label {
     flex: 1 !important; display: flex !important;
     align-items: center !important; justify-content: center !important;
     padding: 6px 0 !important; border-radius: 10px !important;
-    cursor: pointer !important; min-width: 0 !important; gap: 0 !important;
+    cursor: pointer !important; min-width: 0 !important;
 }
-[data-testid="stRadio"] label:has(input:checked) { background: #E3F2FD !important; }
-[data-testid="stRadio"] label p { font-size: 26px !important; line-height: 1 !important; margin: 0 !important; }
-[data-testid="stRadio"] label > div:first-child,
-[data-testid="stRadio"] label > div:first-child *,
-[data-testid="stRadio"] input[type="radio"] {
+#nav-radio-wrap [data-testid="stRadio"] label:has(input:checked) {
+    background: #E3F2FD !important;
+}
+#nav-radio-wrap [data-testid="stRadio"] label p {
+    font-size: 26px !important; line-height: 1 !important; margin: 0 !important;
+}
+/* Nascondi pallino radio — tutti i selettori possibili */
+#nav-radio-wrap [data-testid="stRadio"] label > div:first-child {
     display: none !important; width: 0 !important; height: 0 !important;
-    min-width: 0 !important; margin: 0 !important; padding: 0 !important;
-    overflow: hidden !important;
+    overflow: hidden !important; margin: 0 !important; padding: 0 !important;
 }
-[data-testid="stRadio"] > label,
-[data-testid="stWidgetLabel"] { display: none !important; }
-/* Fascia bianca sotto la nav — copre il contenuto della pagina */
+#nav-radio-wrap [data-testid="stRadio"] input[type="radio"] {
+    display: none !important;
+}
+#nav-radio-wrap [data-testid="stRadio"] > label { display: none !important; }
+/* Fascia bianca sotto che copre la pagina */
 .nav-cover-strip {
     position: fixed !important;
     bottom: 0 !important; left: 0 !important; right: 0 !important;
@@ -1813,6 +1797,7 @@ def render_bottom_nav():
 }
 .block-container { padding-bottom: 130px !important; }
 </style>
+<div id="nav-radio-wrap">
 <div class="nav-cover-strip"></div>
 """, unsafe_allow_html=True)
 
@@ -1820,6 +1805,7 @@ def render_bottom_nav():
         "nav", options=_options, index=_cur_idx,
         horizontal=True, label_visibility="collapsed", key="nav_radio"
     )
+    st.markdown('</div>', unsafe_allow_html=True)
 
     _sel_key = _keys[_options.index(_sel)]
     if _sel_key != cur:
