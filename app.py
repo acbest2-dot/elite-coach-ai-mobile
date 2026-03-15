@@ -806,6 +806,36 @@ def gsheet_load_conversations() -> list:
     except Exception:
         return []
 
+def gsheet_save_coach_memory(memory: dict):
+    """Salva la memoria del coach (fatti chiave sull'atleta) nel tab 'coach_memory'."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return
+    try:
+        try:
+            ws = sheet.worksheet("coach_memory")
+        except Exception:
+            ws = sheet.add_worksheet(title="coach_memory", rows=50, cols=3)
+        rows = [["key", "value", "updated_at"]]
+        for k, v in memory.items():
+            rows.append([k, str(v), datetime.now().isoformat()])
+        ws.clear()
+        ws.update(rows, "A1")
+    except Exception:
+        pass
+
+def gsheet_load_coach_memory() -> dict:
+    """Carica la memoria del coach. Ritorna dict {key: value}."""
+    _, sheet = _get_gsheet_client()
+    if sheet is None:
+        return {}
+    try:
+        ws = sheet.worksheet("coach_memory")
+        records = ws.get_all_records()
+        return {r["key"]: r["value"] for r in records if r.get("key")}
+    except Exception:
+        return {}
+
 def gsheet_save_weekly_plan(plan: str):
     """Salva il piano settimanale nel tab 'weekly_plan'."""
     _, sheet = _get_gsheet_client()
@@ -1558,6 +1588,11 @@ for key, val in {
     "weekly_plan_date":   None,
     "_chat_pending":      False,
     "_nav_open":          False,
+    "coach_memory":       {},
+    "structured_plan":    None,
+    "structured_plan_date": None,
+    "_memory_loaded":     False,
+    "_proactive_done":    False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -1701,6 +1736,136 @@ def get_proactive_alerts(df: pd.DataFrame, current_ctl: float, current_atl: floa
         })
 
     return alerts
+
+
+def extract_and_update_memory(messages: list, memory: dict) -> dict:
+    """
+    Analizza la conversazione e aggiorna la memoria con fatti chiave nuovi.
+    Chiama l'AI solo se ci sono abbastanza messaggi nuovi.
+    """
+    if len(messages) < 4:
+        return memory
+    _conv_text = "\n".join([
+        ("Atleta" if m["role"] == "user" else "Coach") + ": " + str(m["content"])
+        for m in messages[-20:]
+    ])
+    _prompt = (
+        "Analizza questa conversazione tra atleta e coach sportivo.\n"
+        "Estrai i FATTI CHIAVE nuovi che il coach dovrebbe ricordare nelle sessioni future.\n"
+        "Includi solo informazioni concrete e durature: obiettivi, infortuni, preferenze, "
+        "punti di forza/debolezza emersi, eventi in programma, feedback su allenamenti.\n"
+        "NON includere dati già visibili in Strava (CTL, TSS, ecc).\n\n"
+        f"Memoria attuale: {json.dumps(memory, ensure_ascii=False)}\n\n"
+        f"Conversazione:\n{_conv_text}\n\n"
+        "Rispondi SOLO con un JSON valido {\"chiave\": \"valore\"} con max 10 fatti. "
+        "Usa chiavi brevi in italiano (es: 'obiettivo_gara', 'infortunio', 'sport_preferito'). "
+        "Mantieni i fatti esistenti e aggiungi/aggiorna quelli nuovi. "
+        "Se non ci sono nuovi fatti rilevanti rispondi con {}."
+    )
+    try:
+        _raw = ai_generate(_prompt, max_tokens=400)
+        _raw = _raw.strip()
+        # Estrai JSON dalla risposta
+        _start = _raw.find("{")
+        _end   = _raw.rfind("}") + 1
+        if _start >= 0 and _end > _start:
+            _new = json.loads(_raw[_start:_end])
+            memory.update(_new)
+    except Exception:
+        pass
+    return memory
+
+
+def build_proactive_opener(df, u, current_ctl, current_atl, current_tsb,
+                            status_label, memory: dict) -> str:
+    """
+    Genera un messaggio proattivo del coach basato su:
+    - Stato forma attuale
+    - Ultima attività
+    - Memoria precedente
+    - Alert attivi
+    Restituisce stringa vuota se non c'è niente di rilevante.
+    """
+    last = df.iloc[-1]
+    days_off = (datetime.now() - last["start_date"]).days
+    m_last = format_metrics(last)
+    s_last = get_sport_info(last["type"])
+
+    memory_str = ""
+    if memory:
+        memory_str = "Cose che so sull'atleta: " + "; ".join(
+            f"{k}={v}" for k, v in list(memory.items())[:5]
+        )
+
+    _prompt = (
+        "Sei un coach sportivo. Stai aprendo una nuova sessione di coaching.\n"
+        f"Atleta: CTL={current_ctl:.0f}, ATL={current_atl:.0f}, "
+        f"TSB={current_tsb:+.0f} ({status_label})\n"
+        f"Ultima uscita: {days_off} giorni fa — {s_last['label']} "
+        f"{m_last['dist_str']} {m_last['dur_str']} TSS={last['tss']:.0f}\n"
+        f"{memory_str}\n\n"
+        "Scrivi UN messaggio di apertura breve (2-3 frasi) che:\n"
+        "1. Commenta lo stato attuale con un fatto concreto\n"
+        "2. Fa UNA domanda specifica o propone un'azione\n"
+        "Non usare formule di saluto generiche. Sii diretto come un coach vero.\n"
+        "Rispondi in italiano."
+    )
+    try:
+        return ai_generate(_prompt, max_tokens=120)
+    except Exception:
+        return ""
+
+
+def build_structured_weekly_plan(df, u, current_ctl, current_atl, current_tsb,
+                                  status_label, vo2max_val, memory: dict) -> dict:
+    """
+    Genera un piano settimanale strutturato in JSON con 7 giorni.
+    Formato: {"giorni": [{"giorno": "Lun", "data": "...", "tipo": "...",
+              "durata": "...", "zona": "...", "tss": N, "note": "..."}],
+              "tss_totale": N, "focus": "..."}
+    """
+    df7  = df[df["start_date"] >= df["start_date"].max() - pd.Timedelta(days=7)]
+    df28 = df[df["start_date"] >= df["start_date"].max() - pd.Timedelta(days=28)]
+    avg_tss = df28["tss"].sum() / 28 if not df28.empty else 50
+    sport_mix = df28["type"].value_counts().head(3)
+    sport_str = " / ".join([str(k) for k in sport_mix.index])
+    memory_str = "; ".join(f"{k}={v}" for k, v in memory.items()) if memory else ""
+
+    _today = datetime.now()
+    _days_labels = []
+    _giorni_ita  = ["Lun","Mar","Mer","Gio","Ven","Sab","Dom"]
+    for i in range(7):
+        _d = _today + timedelta(days=i)
+        _days_labels.append(f"{_giorni_ita[_d.weekday()]} {_d.strftime('%d/%m')}")
+
+    _prompt = (
+        "Sei un coach sportivo d'elite. Crea un piano allenamento per i prossimi 7 giorni.\n\n"
+        f"ATLETA: {u.get('eta',33)} anni, {u.get('peso',75)}kg, "
+        f"FTP={u.get('ftp',200)}W, FCmax={u['fc_max']}bpm\n"
+        f"FORMA: CTL={current_ctl:.0f} ATL={current_atl:.0f} TSB={current_tsb:+.0f} ({status_label})\n"
+        f"TSS medio/giorno (28gg): {avg_tss:.0f}\n"
+        f"Sport praticati: {sport_str}\n"
+        f"Sessioni ultima settimana: {len(df7)}, TSS={df7['tss'].sum():.0f}\n"
+        + (f"Note atleta: {memory_str}\n" if memory_str else "") +
+        f"\nGiorni: {', '.join(_days_labels)}\n\n"
+        "Rispondi SOLO con JSON valido, nessun testo fuori:\n"
+        '{"focus": "obiettivo settimana in 1 frase", '
+        '"tss_totale": numero, '
+        '"giorni": ['
+        '{"giorno": "Lun 16/06", "tipo": "Riposo|Recupero|Aerobico|Soglia|Intervalli|Lungo|Gara", '
+        '"durata": "45 min", "zona": "Z1-Z2", "tss": 40, "note": "breve nota specifica"}'
+        "]}"
+    )
+    try:
+        _raw = ai_deep(_prompt)
+        _raw = _raw.strip()
+        _start = _raw.find("{")
+        _end   = _raw.rfind("}") + 1
+        if _start >= 0 and _end > _start:
+            return json.loads(_raw[_start:_end])
+    except Exception:
+        pass
+    return {}
 
 
 # ============================================================
@@ -3208,43 +3373,29 @@ elif st.session_state.mob_menu == "chat":
 
     st.markdown("""
     <style>
-    /* Chat container scrollabile */
-    .chat-messages-wrap {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding-bottom: 8px;
-    }
-    /* Animazione typing */
+    .chat-messages-wrap { display:flex; flex-direction:column; gap:2px; padding-bottom:8px; }
     .typing-dots span {
-        display: inline-block;
-        width: 7px; height: 7px;
-        margin: 0 2px;
-        background: #1565C0;
-        border-radius: 50%;
-        animation: bounce 1.2s infinite;
+        display:inline-block; width:7px; height:7px; margin:0 2px;
+        background:#1565C0; border-radius:50%; animation:bounce 1.2s infinite;
     }
-    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes bounce {
-        0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; }
-        40% { transform: scale(1); opacity: 1; }
-    }
-    /* Quick prompt buttons */
-    .qp-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        padding: 8px 12px 0;
-    }
-    /* Streamlit chat input fix — sempre visibile sopra la nav */
+    .typing-dots span:nth-child(2) { animation-delay:0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay:0.4s; }
+    @keyframes bounce { 0%,80%,100%{transform:scale(0.7);opacity:0.5} 40%{transform:scale(1);opacity:1} }
+    .qp-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px 12px 0; }
     div[data-testid="stChatInput"] {
-        position: sticky !important;
-        bottom: 88px !important;
-        background: #f0f2f6 !important;
-        padding: 8px 0 4px !important;
-        z-index: 998 !important;
+        position:sticky !important; bottom:88px !important;
+        background:#f0f2f6 !important; padding:8px 0 4px !important; z-index:998 !important;
     }
+    /* Piano strutturato */
+    .plan-day {
+        border-radius:12px; padding:10px 12px; margin:4px 0;
+        border-left:4px solid #ccc;
+    }
+    .plan-day-rest  { background:#f8f9fa; border-left-color:#ccc; }
+    .plan-day-easy  { background:#E8F5E9; border-left-color:#4CAF50; }
+    .plan-day-base  { background:#E3F2FD; border-left-color:#2196F3; }
+    .plan-day-hard  { background:#FFF3E0; border-left-color:#FF9800; }
+    .plan-day-race  { background:#FCE4EC; border-left-color:#E91E63; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -3254,24 +3405,40 @@ elif st.session_state.mob_menu == "chat":
     if _ai_sdk_mode is None:
         st.warning("⚠️ Aggiungi GOOGLE_API_KEY nei Secrets per abilitare il Coach AI.")
     else:
-        # Contesto coach ricco — 6 mesi dati completi
+        # ── Carica memoria da GSheet (una volta per sessione) ──
+        if not st.session_state.get("_memory_loaded") and _gsheet_ok:
+            _loaded_mem = gsheet_load_coach_memory()
+            if _loaded_mem:
+                st.session_state["coach_memory"] = _loaded_mem
+            st.session_state["_memory_loaded"] = True
+
+        _memory = st.session_state.get("coach_memory", {})
+
+        # ── Contesto sistema con memoria ──
         if "chat_ctx_cache" not in st.session_state:
             with st.spinner("📊 Carico contesto atleta..."):
                 st.session_state["chat_ctx_cache"] = build_chat_context(
                     df, u, current_ctl, current_atl, current_tsb, status_label, vo2max_val
                 )
+
+        _memory_str = ""
+        if _memory:
+            _memory_str = "\n\n=== MEMORIA PERSISTENTE (sessioni precedenti) ===\n" + \
+                "\n".join(f"• {k}: {v}" for k, v in _memory.items())
+
         _ctx_sys = (
             "Sei un coach sportivo d'elite specializzato in ciclismo, trail running e sci alpinismo. "
             "Sei sia ANALISTA (spieghi i dati, le cause, i trend) "
             "che PROGRAMMATORE (piani concreti, sessioni specifiche, carichi con numeri). "
-            "Personalita: diretto, asciutto, professionale. Zero frasi motivazionali generiche. "
+            "Personalità: diretto, asciutto, professionale. Zero frasi motivazionali generiche. "
             "Rispondi sempre in italiano. Usa sempre i numeri disponibili. "
             "Se ti chiedono un piano: sessioni con tipo, durata, zona target, TSS stimato. "
             "Se ti chiedono un'analisi: usa CTL/ATL/TSB/TSS/watt/FC con valori precisi.\n\n"
             + st.session_state["chat_ctx_cache"]
+            + _memory_str
         )
 
-        # Stato forma rapido in cima alla chat
+        # ── Stato forma rapido in cima ──
         _tsb_col = "#4CAF50" if current_tsb > 10 else ("#FF9800" if current_tsb > -5 else "#F44336")
         st.markdown(f"""
         <div style="display:flex;gap:8px;align-items:center;padding:4px 12px 8px;
@@ -3281,38 +3448,55 @@ elif st.session_state.mob_menu == "chat":
             <span>TSB <b style="color:{_tsb_col}">{current_tsb:+.0f}</b></span>
             <span style="background:{status_color}22;color:{status_color};
                          padding:2px 8px;border-radius:20px;font-weight:700">{status_label}</span>
+            {"".join([f'<span style="background:#f0f0f0;padding:2px 6px;border-radius:8px;font-size:10px;color:#555">🧠 {k}: {v}</span>' for k,v in list(_memory.items())[:2]]) if _memory else ""}
         </div>
         """, unsafe_allow_html=True)
 
-        # Quick prompts (solo se chat vuota o come suggerimenti)
-        if not st.session_state.messages:
-            st.markdown("""
-            <div style="text-align:center;padding:20px 12px 8px">
-                <div style="font-size:40px">🏆</div>
-                <div style="font-size:15px;font-weight:700;color:#1565C0;margin:8px 0 4px">Coach AI</div>
-                <div style="font-size:13px;color:#888">Chiedi qualsiasi cosa sul tuo allenamento</div>
-            </div>
-            """, unsafe_allow_html=True)
+        # ── Messaggio proattivo del coach (una volta per sessione, se chat vuota) ──
+        if (not st.session_state.messages and
+                not st.session_state.get("_proactive_done")):
+            st.session_state["_proactive_done"] = True
+            with st.spinner("🤖 Il coach sta preparando un aggiornamento..."):
+                _opener = build_proactive_opener(
+                    df, u, current_ctl, current_atl, current_tsb,
+                    status_label, _memory
+                )
+            if _opener:
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": _opener
+                })
+                st.rerun()
 
-        quick_prompts = [
-            "💪 Come sto fisicamente?",
-            "🗓️ Cosa fare oggi?",
-            "📋 Piano questa settimana",
-            "📊 Analizza gli ultimi 30gg",
-        ]
-        st.markdown('<div class="qp-grid">', unsafe_allow_html=True)
-        qc = st.columns(2)
-        for i, qp in enumerate(quick_prompts):
-            with qc[i % 2]:
-                if st.button(qp, use_container_width=True, key=f"qp_{i}",
-                             type="secondary"):
-                    clean_qp = qp.split(" ", 1)[1] if qp[0] in "💪🗓📋📊" else qp
-                    st.session_state.messages.append({"role": "user", "content": clean_qp})
-                    st.session_state["_chat_pending"] = True
-                    st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        # ── Quick prompts (solo se chat ha ≤1 messaggio) ──
+        if len(st.session_state.messages) <= 1:
+            if not st.session_state.messages:
+                st.markdown("""
+                <div style="text-align:center;padding:20px 12px 8px">
+                    <div style="font-size:40px">🏆</div>
+                    <div style="font-size:15px;font-weight:700;color:#1565C0;margin:8px 0 4px">Coach AI</div>
+                    <div style="font-size:13px;color:#888">Chiedi qualsiasi cosa sul tuo allenamento</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-        # Mostra messaggi con bubble pulite
+            quick_prompts = [
+                "💪 Come sto fisicamente?",
+                "🗓️ Cosa fare oggi?",
+                "📋 Piano questa settimana",
+                "📊 Analizza gli ultimi 30gg",
+            ]
+            st.markdown('<div class="qp-grid">', unsafe_allow_html=True)
+            qc = st.columns(2)
+            for i, qp in enumerate(quick_prompts):
+                with qc[i % 2]:
+                    if st.button(qp, use_container_width=True, key=f"qp_{i}", type="secondary"):
+                        clean_qp = qp.split(" ", 1)[1] if qp[0] in "💪🗓📋📊" else qp
+                        st.session_state.messages.append({"role": "user", "content": clean_qp})
+                        st.session_state["_chat_pending"] = True
+                        st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # ── Messaggi chat ──
         st.markdown('<div class="chat-messages-wrap">', unsafe_allow_html=True)
         for msg in st.session_state.messages:
             if msg["role"] == "user":
@@ -3328,17 +3512,15 @@ elif st.session_state.mob_menu == "chat":
                     unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Risposta pendente (dopo quick prompt o invio)
+        # ── Risposta pendente ──
         if st.session_state.get("_chat_pending") and st.session_state.messages:
             last_msg = st.session_state.messages[-1]
             if last_msg["role"] == "user":
-                # Mostra indicatore typing
                 st.markdown(
                     '<div class="chat-label" style="margin-left:14px">🤖 Coach</div>'
                     '<div class="chat-ai" style="padding:12px 16px">'
                     '<div class="typing-dots"><span></span><span></span><span></span></div>'
-                    '</div>',
-                    unsafe_allow_html=True)
+                    '</div>', unsafe_allow_html=True)
                 _hlines = [
                     ("Atleta" if _m["role"] == "user" else "Coach") + ": " + str(_m["content"])
                     for _m in st.session_state.messages[-12:]
@@ -3346,17 +3528,105 @@ elif st.session_state.mob_menu == "chat":
                 res = ai_deep(_ctx_sys + "\n\n=== CONVERSAZIONE ===\n" + "\n".join(_hlines))
                 st.session_state.messages.append({"role": "assistant", "content": res})
                 st.session_state["_chat_pending"] = False
+                # Aggiorna memoria dopo ogni risposta
+                if len(st.session_state.messages) % 6 == 0:
+                    _new_mem = extract_and_update_memory(
+                        st.session_state.messages,
+                        st.session_state.get("coach_memory", {})
+                    )
+                    st.session_state["coach_memory"] = _new_mem
+                    if _gsheet_ok:
+                        gsheet_save_coach_memory(_new_mem)
                 if _gsheet_ok:
                     gsheet_save_conversations(st.session_state.messages)
                 st.rerun()
 
-        # Input chat — sticky sopra la nav bar
+        # ── Input chat ──
         if prompt := st.chat_input("Scrivi al tuo coach..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.session_state["_chat_pending"] = True
             st.rerun()
 
-        # Azioni in fondo
+        # ── Piano strutturato ──
+        st.markdown('<div class="mob-card" style="margin-top:8px">'
+                    '<div class="mob-card-title">📅 Piano Settimanale Strutturato</div>',
+                    unsafe_allow_html=True)
+
+        _splan = st.session_state.get("structured_plan")
+        _splan_dt = st.session_state.get("structured_plan_date")
+        _splan_age = (datetime.now() - _splan_dt).days if _splan_dt else 999
+
+        if _splan and _splan_age < 7 and isinstance(_splan, dict) and "giorni" in _splan:
+            # Visualizza calendario 7 giorni
+            st.markdown(
+                f'<div style="font-size:11px;color:#888;margin-bottom:8px">'
+                f'🎯 {_splan.get("focus","")}</div>',
+                unsafe_allow_html=True)
+
+            _tipo_class = {
+                "Riposo": "plan-day-rest", "Recupero": "plan-day-easy",
+                "Aerobico": "plan-day-easy", "Lungo": "plan-day-base",
+                "Soglia": "plan-day-hard", "Intervalli": "plan-day-hard",
+                "Gara": "plan-day-race",
+            }
+            for _day in _splan.get("giorni", []):
+                _tipo = _day.get("tipo", "")
+                _cls  = _tipo_class.get(_tipo, "plan-day-base")
+                _tss_day = _day.get("tss", 0)
+                _tss_str = f'<span style="font-size:10px;color:#888">TSS {_tss_day}</span>' if _tss_day else ""
+                st.markdown(
+                    f'<div class="plan-day {_cls}">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<div style="font-size:12px;font-weight:700;color:#555">{_day.get("giorno","")}</div>'
+                    f'{_tss_str}</div>'
+                    f'<div style="font-size:13px;font-weight:700;margin:2px 0">{_tipo} '
+                    f'<span style="font-weight:400;color:#777">{_day.get("durata","")}</span></div>'
+                    f'<div style="font-size:11px;color:#888">{_day.get("zona","")} · {_day.get("note","")}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True)
+
+            st.markdown(
+                f'<div style="font-size:11px;color:#888;text-align:right;margin-top:4px">'
+                f'TSS totale previsto: <b>{_splan.get("tss_totale", "?")}</b></div>',
+                unsafe_allow_html=True)
+
+            if st.button("🔄 Rigenera piano", use_container_width=True, key="regen_splan"):
+                st.session_state["structured_plan"] = None
+                st.session_state["structured_plan_date"] = None
+                st.rerun()
+        else:
+            if st.button("📅 Genera Piano 7 Giorni", use_container_width=True,
+                         type="primary", key="gen_splan"):
+                with st.spinner("Il coach costruisce il piano..."):
+                    _sp = build_structured_weekly_plan(
+                        df, u, current_ctl, current_atl, current_tsb,
+                        status_label, vo2max_val,
+                        st.session_state.get("coach_memory", {})
+                    )
+                    if _sp:
+                        st.session_state["structured_plan"] = _sp
+                        st.session_state["structured_plan_date"] = datetime.now()
+                        st.rerun()
+                    else:
+                        st.error("Errore nella generazione del piano. Riprova.")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── Memoria coach ──
+        if _memory:
+            with st.expander("🧠 Memoria Coach", expanded=False):
+                for _mk, _mv in _memory.items():
+                    st.markdown(
+                        f'<div style="font-size:12px;padding:3px 0;border-bottom:1px solid #f0f0f0">'
+                        f'<b style="color:#555">{_mk}</b>: {_mv}</div>',
+                        unsafe_allow_html=True)
+                if st.button("🗑️ Cancella memoria", key="clear_memory", use_container_width=True):
+                    st.session_state["coach_memory"] = {}
+                    if _gsheet_ok:
+                        gsheet_save_coach_memory({})
+                    st.rerun()
+
+        # ── Azioni ──
         if st.session_state.messages:
             st.markdown('<div class="sec-pad" style="margin-top:4px">', unsafe_allow_html=True)
             c_clr1, c_clr2 = st.columns(2)
@@ -3364,6 +3634,7 @@ elif st.session_state.mob_menu == "chat":
                 if st.button("🗑️ Nuova chat", use_container_width=True):
                     st.session_state.messages = []
                     st.session_state["_chat_pending"] = False
+                    st.session_state["_proactive_done"] = False
                     st.rerun()
             with c_clr2:
                 if st.button("🔄 Aggiorna dati", use_container_width=True):
