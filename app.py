@@ -1569,33 +1569,59 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Nav compatta — bottoni piccoli con solo icona."""
+    """Nav orizzontale con st.radio — sempre orizzontale su tutti i device."""
     cur = st.session_state.mob_menu
+
+    # Mappa icona → chiave
+    _options = [f"{icon}" for _, icon, _ in NAV_ITEMS]
+    _keys    = [key for key, _, _ in NAV_ITEMS]
+    _labels  = [label for _, _, label in NAV_ITEMS]
+    _cur_idx = _keys.index(cur) if cur in _keys else 0
 
     st.markdown("""
 <style>
-.nav-compact-row div[data-testid="stButton"] > button {
-    min-height: 34px !important;
-    height: 34px !important;
-    font-size: 20px !important;
-    padding: 0 !important;
-    border-radius: 8px !important;
+/* Compatta il radio nav */
+div[data-testid="stRadio"] > div {
+    gap: 2px !important;
+    flex-wrap: nowrap !important;
+}
+div[data-testid="stRadio"] label {
+    flex: 1 !important;
+    justify-content: center !important;
+    font-size: 22px !important;
+    padding: 6px 2px !important;
+    border-radius: 10px !important;
+    min-width: 0 !important;
+    border: none !important;
+}
+div[data-testid="stRadio"] label:has(input:checked) {
+    background: #E3F2FD !important;
+    color: #1565C0 !important;
+}
+div[data-testid="stRadio"] label span[data-testid="stMarkdownContainer"] p {
+    font-size: 22px !important;
     line-height: 1 !important;
 }
+div[data-testid="stRadio"] > label { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
-    st.markdown('<div class="nav-compact-row">', unsafe_allow_html=True)
-    _cols = st.columns(5)
-    for i, (key, icon, label) in enumerate(NAV_ITEMS):
-        with _cols[i]:
-            _t = "primary" if cur == key else "secondary"
-            if st.button(icon, key=f"nav_btn_{key}",
-                         use_container_width=True, type=_t, help=label):
-                st.session_state.mob_menu = key
-                st.session_state.selected_act_id = None
-                st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    _sel = st.radio(
+        "nav",
+        options=_options,
+        index=_cur_idx,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="nav_radio"
+    )
+
+    # Aggiorna menu se cambiato
+    _sel_idx = _options.index(_sel)
+    _sel_key = _keys[_sel_idx]
+    if _sel_key != cur:
+        st.session_state.mob_menu = _sel_key
+        st.session_state.selected_act_id = None
+        st.rerun()
 
 
 def get_act_micro_comment(row_data, metrics, sport_info) -> str:
