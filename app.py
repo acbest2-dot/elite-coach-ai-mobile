@@ -1599,14 +1599,10 @@ def render_bottom_nav():
 }
 [data-testid="stRadio"] label:has(input:checked) { background: #E3F2FD !important; }
 [data-testid="stRadio"] label p { font-size: 26px !important; line-height: 1 !important; margin: 0 !important; }
-/* Nascondi pallino — tutti i selettori */
+/* Nascondi pallino */
 [data-testid="stRadio"] label > div:first-child,
 [data-testid="stRadio"] label > div:first-child *,
-[data-testid="stRadio"] [data-baseweb="radio"],
-[data-testid="stRadio"] [data-baseweb="radio"] > div,
-[data-testid="stRadio"] input[type="radio"],
-[data-testid="stRadio"] [class*="st-b"],
-[data-testid="stRadio"] [class*="st-c"] {
+[data-testid="stRadio"] input[type="radio"] {
     display: none !important; width: 0 !important; height: 0 !important;
     min-width: 0 !important; margin: 0 !important; padding: 0 !important;
     overflow: hidden !important;
