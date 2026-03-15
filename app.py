@@ -1569,47 +1569,75 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Nav orizzontale con st.radio — sempre orizzontale su tutti i device."""
+    """Nav radio orizzontale — fissa in basso, pallini nascosti."""
     cur = st.session_state.mob_menu
 
-    # Mappa icona → chiave
-    _options = [f"{icon}" for _, icon, _ in NAV_ITEMS]
-    _keys    = [key for key, _, _ in NAV_ITEMS]
-    _labels  = [label for _, _, label in NAV_ITEMS]
+    _options = [icon for _, icon, _ in NAV_ITEMS]
+    _keys    = [key  for key, _, _ in NAV_ITEMS]
     _cur_idx = _keys.index(cur) if cur in _keys else 0
+
+    # Wrapper con ID univoco per scoping CSS preciso
+    st.markdown('<div id="nav-radio-wrap">', unsafe_allow_html=True)
 
     st.markdown("""
 <style>
-/* Nascondi i pallini radio */
-div[data-testid="stRadio"] input[type="radio"] {
-    display: none !important;
+/* Fissa il wrapper in basso */
+#nav-radio-wrap {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 99999 !important;
+    background: #ffffff !important;
+    border-top: 1.5px solid #e8e8e8 !important;
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
+    padding: 6px 8px 10px !important;
 }
-div[data-testid="stRadio"] > div {
+/* Nascondi cerchietto radio — tutti i selettori possibili */
+#nav-radio-wrap input[type="radio"],
+#nav-radio-wrap [data-baseweb="radio"] > div:first-child,
+#nav-radio-wrap [data-testid="stRadio"] input,
+#nav-radio-wrap span[data-testid="stWidgetLabel"] { 
+    display: none !important; 
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+/* Layout riga radio */
+#nav-radio-wrap [data-testid="stRadio"] > div {
     gap: 4px !important;
     flex-wrap: nowrap !important;
+    width: 100% !important;
 }
-div[data-testid="stRadio"] label {
+/* Ogni opzione */
+#nav-radio-wrap [data-testid="stRadio"] label {
     flex: 1 !important;
-    justify-content: center !important;
-    font-size: 24px !important;
-    padding: 6px 2px !important;
-    border-radius: 10px !important;
-    min-width: 0 !important;
-    border: none !important;
-    cursor: pointer !important;
     display: flex !important;
     align-items: center !important;
+    justify-content: center !important;
+    font-size: 26px !important;
+    padding: 4px 0 !important;
+    border-radius: 10px !important;
+    min-width: 0 !important;
+    cursor: pointer !important;
+    gap: 0 !important;
 }
-div[data-testid="stRadio"] label:has(input:checked) {
+/* Icona attiva */
+#nav-radio-wrap [data-testid="stRadio"] label:has(input:checked) {
     background: #E3F2FD !important;
 }
-div[data-testid="stRadio"] label span[data-testid="stMarkdownContainer"] p {
-    font-size: 24px !important;
+/* Testo emoji dentro il label */
+#nav-radio-wrap [data-testid="stRadio"] label p {
+    font-size: 26px !important;
     line-height: 1 !important;
     margin: 0 !important;
 }
-/* Nascondi label del radio widget */
-div[data-testid="stRadio"] > label { display: none !important; }
+/* Nascondi titolo widget */
+#nav-radio-wrap [data-testid="stRadio"] > label,
+#nav-radio-wrap .st-emotion-cache-ue6h4q { display: none !important; }
+/* Spazio in fondo al contenuto */
+.block-container { padding-bottom: 80px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1622,9 +1650,9 @@ div[data-testid="stRadio"] > label { display: none !important; }
         key="nav_radio"
     )
 
-    # Aggiorna menu se cambiato
-    _sel_idx = _options.index(_sel)
-    _sel_key = _keys[_sel_idx]
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    _sel_key = _keys[_options.index(_sel)]
     if _sel_key != cur:
         st.session_state.mob_menu = _sel_key
         st.session_state.selected_act_id = None
