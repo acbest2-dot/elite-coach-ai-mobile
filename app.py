@@ -1570,119 +1570,84 @@ NAV_ITEMS = [
 
 def render_bottom_nav():
     """
-    Nav bar fissa in alto. Approccio definitivo:
-    1. HTML decorativo fisso con le icone (pointer-events:none)
-    2. I bottoni Streamlit vengono spostati fisicamente DENTRO la nav via JS
-    3. I bottoni diventano trasparenti ma cliccabili — le icone HTML restano visibili sotto
+    Nav bar in alto — bottoni Streamlit nativi stilizzati come nav orizzontale.
+    Solo CSS, zero JS, zero problemi di escape.
+    I bottoni appaiono come icona + label piccola in una riga orizzontale compatta.
     """
     cur = st.session_state.mob_menu
 
-    # Icone e label per JS (usate per identificare i bottoni e aggiornare la nav)
-    _active_icons = {key: icon for key, icon, _ in NAV_ITEMS}
-
-    # HTML nav decorativa
-    _items_html = ""
-    for key, icon, label in NAV_ITEMS:
-        _bg  = "background:#E3F2FD;" if cur == key else ""
-        _col = "color:#1565C0;" if cur == key else "color:#666;"
-        _items_html += (
-            f'<div class="nav-slot" data-key="{key}" '
-            f'style="flex:1;display:flex;flex-direction:column;align-items:center;'
-            f'justify-content:center;padding:4px 2px;border-radius:8px;{_bg};pointer-events:none">'
-            f'<span style="font-size:18px;line-height:1">{icon}</span>'
-            f'<span style="font-size:9px;font-weight:600;margin-top:1px;{_col}">{label}</span>'
-            f'</div>'
-        )
-
-    st.markdown(f"""
+    # CSS in stringa separata — NESSUNA f-string, niente escape problemi
+    nav_css = """
 <style>
-.top-nav-bar {{
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    height: 52px;
-    background: #ffffff;
-    border-bottom: 1px solid #e8e8e8;
-    box-shadow: 0 1px 8px rgba(0,0,0,0.07);
-    display: flex;
-    align-items: stretch;
-    z-index: 99998;
-    padding: 3px 4px;
-}}
-.block-container {{
-    padding-top: 60px !important;
-    padding-bottom: 20px !important;
-}}
-/* I bottoni spostati dentro la nav */
-.top-nav-bar button.nav-real-btn {{
-    position: absolute !important;
-    top: 0 !important; bottom: 0 !important;
-    opacity: 0 !important;
-    border: none !important;
-    background: transparent !important;
-    cursor: pointer !important;
-    z-index: 99999 !important;
-    padding: 0 !important;
-    min-height: unset !important;
-}}
-</style>
-<div class="top-nav-bar" id="top-nav-bar">{_items_html}</div>
-<script>
-(function() {{
-  function moveNavButtons() {{
-    var nav = document.getElementById('top-nav-bar');
-    if (!nav) return;
-    var slots = nav.querySelectorAll('.nav-slot');
-    if (slots.length !== 5) return;
-    
-    // Cerca i bottoni Streamlit con le label delle sezioni
-    var labels = ['Home','Fitness','Storico','Coach','Profilo'];
-    var allBtns = Array.from(document.querySelectorAll('button'));
-    var navBtns = allBtns.filter(function(b) {{
-      return labels.includes(b.innerText.trim());
-    }});
-    
-    if (navBtns.length !== 5) return;
-    
-    // Calcola posizione di ogni slot e sovrapponi il bottone
-    var navRect = nav.getBoundingClientRect();
-    navBtns.forEach(function(btn, i) {{
-      var slot = slots[i];
-      if (!slot) return;
-      var slotRect = slot.getBoundingClientRect();
-      btn.classList.add('nav-real-btn');
-      btn.style.position = 'fixed';
-      btn.style.top = slotRect.top + 'px';
-      btn.style.left = slotRect.left + 'px';
-      btn.style.width = slotRect.width + 'px';
-      btn.style.height = slotRect.height + 'px';
-      btn.style.opacity = '0';
-      btn.style.zIndex = '99999';
-      btn.style.cursor = 'pointer';
-      btn.style.border = 'none';
-      btn.style.background = 'transparent';
-      btn.style.minHeight = 'unset';
-      btn.style.padding = '0';
-    }});
-  }}
-  
-  // Esegui subito e ogni volta che il DOM cambia
-  moveNavButtons();
-  var obs = new MutationObserver(moveNavButtons);
-  obs.observe(document.body, {{childList: true, subtree: true}});
-  // Anche su resize
-  window.addEventListener('resize', moveNavButtons);
-}})();
-</script>
-""", unsafe_allow_html=True)
+.stMainBlockContainer { padding-top: 60px !important; padding-bottom: 20px !important; }
+.block-container { padding-top: 60px !important; padding-bottom: 20px !important; }
 
-    # Bottoni Streamlit — messi nel DOM normale, il JS li sposta sopra la nav
+/* Seleziona il primo stHorizontalBlock della pagina = la nostra nav */
+[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
+  [data-testid="stHorizontalBlock"] {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important;
+    z-index: 99999 !important;
+    background: #fff !important;
+    border-bottom: 1px solid #e8e8e8 !important;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.07) !important;
+    height: 52px !important;
+    padding: 4px 4px !important;
+    margin: 0 !important;
+    gap: 2px !important;
+    flex-wrap: nowrap !important;
+    align-items: stretch !important;
+}
+[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
+  [data-testid="stHorizontalBlock"] > div {
+    padding: 0 !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    display: flex !important;
+}
+[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
+  [data-testid="stHorizontalBlock"] button {
+    flex: 1 !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    border: none !important;
+    padding: 2px 0 !important;
+    line-height: 1.1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    white-space: pre-line !important;
+    word-break: break-all !important;
+}
+[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
+  [data-testid="stHorizontalBlock"] button[kind="secondary"] {
+    background: #f8f8f8 !important;
+    color: #666 !important;
+}
+[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
+  [data-testid="stHorizontalBlock"] button[kind="primary"] {
+    background: #E3F2FD !important;
+    color: #1565C0 !important;
+}
+</style>
+"""
+    st.markdown(nav_css, unsafe_allow_html=True)
+
+    # I bottoni — label con icona + testo su due righe (emoji newline testo)
     _cols = st.columns(5)
     for i, (key, icon, label) in enumerate(NAV_ITEMS):
         with _cols[i]:
-            if st.button(label, key=f"nav_btn_{key}", use_container_width=True):
+            _t = "primary" if cur == key else "secondary"
+            # Usa \n per mettere icona sopra e label sotto nel bottone
+            if st.button(f"{icon}\n{label}", key=f"nav_btn_{key}",
+                         use_container_width=True, type=_t):
                 st.session_state.mob_menu = key
                 st.session_state.selected_act_id = None
-                st.session_state["_nav_open"] = False
                 st.rerun()
 
 
