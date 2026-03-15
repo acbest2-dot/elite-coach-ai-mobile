@@ -1742,7 +1742,7 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """Nav radio orizzontale — fissa in basso. CSS scoped su #nav-radio-wrap."""
+    """Nav radio orizzontale — fissa in basso."""
     cur = st.session_state.mob_menu
 
     _options = [icon for _, icon, _ in NAV_ITEMS]
@@ -1751,8 +1751,8 @@ def render_bottom_nav():
 
     st.markdown("""
 <style>
-/* ── NAV WRAPPER fissato in basso ── */
-#nav-radio-wrap {
+/* NAV FISSA — selettore globale, funziona su tutti i browser */
+[data-testid="stRadio"] {
     position: fixed !important;
     bottom: 50px !important; left: 0 !important; right: 0 !important;
     z-index: 99999 !important;
@@ -1761,43 +1761,44 @@ def render_bottom_nav():
     border-bottom: 1.5px solid #e8e8e8 !important;
     box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
     padding: 6px 8px !important;
+    margin: 0 !important;
 }
-#nav-radio-wrap [data-testid="stRadio"] > div {
+[data-testid="stRadio"] > div {
     gap: 4px !important; flex-wrap: nowrap !important; width: 100% !important;
-    display: flex !important;
 }
-#nav-radio-wrap [data-testid="stRadio"] label {
+[data-testid="stRadio"] label {
     flex: 1 !important; display: flex !important;
     align-items: center !important; justify-content: center !important;
     padding: 6px 0 !important; border-radius: 10px !important;
     cursor: pointer !important; min-width: 0 !important;
 }
-#nav-radio-wrap [data-testid="stRadio"] label:has(input:checked) {
-    background: #E3F2FD !important;
-}
-#nav-radio-wrap [data-testid="stRadio"] label p {
-    font-size: 26px !important; line-height: 1 !important; margin: 0 !important;
-}
-/* Nascondi pallino radio — tutti i selettori possibili */
-#nav-radio-wrap [data-testid="stRadio"] label > div:first-child {
+[data-testid="stRadio"] label:has(input:checked) { background: #E3F2FD !important; }
+[data-testid="stRadio"] label p { font-size: 26px !important; line-height: 1 !important; margin: 0 !important; }
+/* Nascondi pallino */
+[data-testid="stRadio"] label > div:first-child {
     display: none !important; width: 0 !important; height: 0 !important;
     overflow: hidden !important; margin: 0 !important; padding: 0 !important;
 }
-#nav-radio-wrap [data-testid="stRadio"] input[type="radio"] {
-    display: none !important;
+[data-testid="stRadio"] input[type="radio"] { display: none !important; }
+[data-testid="stRadio"] > label { display: none !important; }
+/* Override: ripristina il radio Vista storico (non-nav) */
+[data-testid="stRadio"]:has(label p:not(:empty)) + div,
+.storico-view-toggle [data-testid="stRadio"] {
+    position: static !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
 }
-#nav-radio-wrap [data-testid="stRadio"] > label { display: none !important; }
-/* Fascia bianca sotto che copre la pagina */
+/* Fascia bianca sotto */
 .nav-cover-strip {
     position: fixed !important;
     bottom: 0 !important; left: 0 !important; right: 0 !important;
-    height: 50px !important;
-    background: #ffffff !important;
+    height: 50px !important; background: #ffffff !important;
     z-index: 99998 !important;
 }
 .block-container { padding-bottom: 130px !important; }
 </style>
-<div id="nav-radio-wrap">
 <div class="nav-cover-strip"></div>
 """, unsafe_allow_html=True)
 
@@ -1805,7 +1806,6 @@ def render_bottom_nav():
         "nav", options=_options, index=_cur_idx,
         horizontal=True, label_visibility="collapsed", key="nav_radio"
     )
-    st.markdown('</div>', unsafe_allow_html=True)
 
     _sel_key = _keys[_options.index(_sel)]
     if _sel_key != cur:
@@ -3071,63 +3071,41 @@ elif st.session_state.mob_menu == "fitness":
         </div>
         </div>""", unsafe_allow_html=True)
 
-    # Volume settimanale ultimi 8 settimane — grafico premium
+    # Volume settimanale — grafico HTML puro, leggibile
     st.markdown('<div class="mob-card"><div class="mob-card-title">📅 Volume settimanale (TSS)</div>',
                 unsafe_allow_html=True)
     weekly = tss_daily.resample("W").sum().tail(8)
-    _avg_tss_w = float(weekly.mean()) if len(weekly) > 0 else 100
+    _avg_w = float(weekly.mean()) if len(weekly) > 0 else 1
+    _max_w = float(weekly.max()) if len(weekly) > 0 else 1
 
-    # Colore per barra in base all'intensità relativa alla media
-    _bar_colors = []
-    for _v in weekly.values:
-        if _v >= _avg_tss_w * 1.15:   _bar_colors.append("#1A56DB")   # sopra media → blu
-        elif _v >= _avg_tss_w * 0.85: _bar_colors.append("#6366F1")   # media → indaco
-        elif _v >= _avg_tss_w * 0.5:  _bar_colors.append("#94A3B8")   # sotto media → grigio
-        else:                          _bar_colors.append("#E2E8F0")   # molto basso → grigio chiaro
-
-    _week_labels = []
-    for d in weekly.index:
-        _week_labels.append(d.strftime("%d/%m"))
-
-    fig3 = go.Figure()
-    fig3.add_trace(go.Bar(
-        x=_week_labels,
-        y=weekly.values,
-        marker_color=_bar_colors,
-        marker_line_width=0,
-        text=[f"{int(v)}" for v in weekly.values],
-        textposition="outside",
-        textfont=dict(size=10, color="#64748B"),
-    ))
-    # Linea media
-    fig3.add_hline(
-        y=_avg_tss_w,
-        line_dash="dot",
-        line_color="rgba(100,116,139,0.4)",
-        line_width=1.5,
-        annotation_text=f"media {_avg_tss_w:.0f}",
-        annotation_font_size=9,
-        annotation_font_color="#94A3B8",
-        annotation_position="top right",
+    _chart_html = '<div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">'
+    for _d, _v in weekly.items():
+        _pct  = int(_v / _max_w * 100) if _max_w > 0 else 0
+        _week = _d.strftime("%d/%m")
+        # colore in base alla distanza dalla media
+        if _v >= _avg_w * 1.15:   _c = "#1A56DB"
+        elif _v >= _avg_w * 0.85: _c = "#6366F1"
+        elif _v >= _avg_w * 0.5:  _c = "#94A3B8"
+        else:                      _c = "#CBD5E1"
+        _is_avg = abs(_v - _avg_w) < _avg_w * 0.05
+        _chart_html += (
+            f'<div style="display:flex;align-items:center;gap:8px">'
+            f'<div style="font-size:11px;color:#94A3B8;width:36px;flex-shrink:0;text-align:right">{_week}</div>'
+            f'<div style="flex:1;background:#F1F5F9;border-radius:6px;height:22px;overflow:hidden">'
+            f'<div style="width:{_pct}%;height:22px;background:{_c};border-radius:6px;'
+            f'display:flex;align-items:center;justify-content:flex-end;padding-right:6px;'
+            f'min-width:32px;transition:width 0.3s">'
+            f'<span style="font-size:11px;font-weight:700;color:white">{int(_v)}</span>'
+            f'</div></div>'
+            f'</div>'
+        )
+    # Riga media
+    _chart_html += (
+        f'<div style="border-top:1px dashed #CBD5E1;padding-top:4px;'
+        f'font-size:10px;color:#94A3B8;text-align:right">media settimana: {_avg_w:.0f} TSS</div>'
     )
-    fig3.update_layout(
-        height=180,
-        margin=dict(l=0, r=0, t=28, b=0),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        bargap=0.35,
-        xaxis=dict(
-            gridcolor="rgba(0,0,0,0)",
-            tickfont=dict(size=10, color="#94A3B8"),
-            tickangle=0,
-        ),
-        yaxis=dict(
-            gridcolor="rgba(0,0,0,0)",
-            visible=False,
-        ),
-        showlegend=False,
-    )
-    st.plotly_chart(fig3, use_container_width=True)
+    _chart_html += '</div>'
+    st.markdown(_chart_html, unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Piano settimanale AI ──
@@ -3224,8 +3202,23 @@ elif st.session_state.mob_menu == "storico":
                                   label_visibility="collapsed")
 
     # Vista toggle: calendario o lista
-    view_toggle = st.radio("Vista", ["📅 Calendario", "📋 Lista"], horizontal=True,
-                            label_visibility="collapsed")
+    # Vista toggle con bottoni — evita conflitto CSS con nav radio
+    _vt_col1, _vt_col2 = st.columns(2)
+    with _vt_col1:
+        _cal_btn = st.button("📅 Calendario", use_container_width=True,
+                             type="primary" if st.session_state.get("_storico_view","cal") == "cal" else "secondary",
+                             key="storico_cal_btn")
+    with _vt_col2:
+        _lst_btn = st.button("📋 Lista", use_container_width=True,
+                             type="primary" if st.session_state.get("_storico_view","cal") == "lst" else "secondary",
+                             key="storico_lst_btn")
+    if _cal_btn:
+        st.session_state["_storico_view"] = "cal"
+        st.rerun()
+    if _lst_btn:
+        st.session_state["_storico_view"] = "lst"
+        st.rerun()
+    view_toggle = "📋 Lista" if st.session_state.get("_storico_view","cal") == "lst" else "📅 Calendario"
 
     if view_toggle == "📋 Lista":
         # ── Lista attività ──
