@@ -1569,86 +1569,33 @@ NAV_ITEMS = [
 ]
 
 def render_bottom_nav():
-    """
-    Nav bar in alto — bottoni Streamlit nativi stilizzati come nav orizzontale.
-    Solo CSS, zero JS, zero problemi di escape.
-    I bottoni appaiono come icona + label piccola in una riga orizzontale compatta.
-    """
+    """Nav compatta — bottoni piccoli con solo icona."""
     cur = st.session_state.mob_menu
 
-    # CSS in stringa separata — NESSUNA f-string, niente escape problemi
-    nav_css = """
+    st.markdown("""
 <style>
-.stMainBlockContainer { padding-top: 60px !important; padding-bottom: 20px !important; }
-.block-container { padding-top: 60px !important; padding-bottom: 20px !important; }
-
-/* Seleziona il primo stHorizontalBlock della pagina = la nostra nav */
-[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
-  [data-testid="stHorizontalBlock"] {
-    position: fixed !important;
-    top: 0 !important; left: 0 !important; right: 0 !important;
-    z-index: 99999 !important;
-    background: #fff !important;
-    border-bottom: 1px solid #e8e8e8 !important;
-    box-shadow: 0 1px 8px rgba(0,0,0,0.07) !important;
-    height: 52px !important;
-    padding: 4px 4px !important;
-    margin: 0 !important;
-    gap: 2px !important;
-    flex-wrap: nowrap !important;
-    align-items: stretch !important;
-}
-[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
-  [data-testid="stHorizontalBlock"] > div {
+.nav-compact-row div[data-testid="stButton"] > button {
+    min-height: 34px !important;
+    height: 34px !important;
+    font-size: 20px !important;
     padding: 0 !important;
-    flex: 1 !important;
-    min-width: 0 !important;
-    display: flex !important;
-}
-[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
-  [data-testid="stHorizontalBlock"] button {
-    flex: 1 !important;
-    height: 44px !important;
-    min-height: 44px !important;
-    max-height: 44px !important;
-    font-size: 11px !important;
-    font-weight: 600 !important;
     border-radius: 8px !important;
-    border: none !important;
-    padding: 2px 0 !important;
-    line-height: 1.1 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    justify-content: center !important;
-    white-space: pre-line !important;
-    word-break: break-all !important;
-}
-[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
-  [data-testid="stHorizontalBlock"] button[kind="secondary"] {
-    background: #f8f8f8 !important;
-    color: #666 !important;
-}
-[data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:first-child
-  [data-testid="stHorizontalBlock"] button[kind="primary"] {
-    background: #E3F2FD !important;
-    color: #1565C0 !important;
+    line-height: 1 !important;
 }
 </style>
-"""
-    st.markdown(nav_css, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-    # I bottoni — label con icona + testo su due righe (emoji newline testo)
+    st.markdown('<div class="nav-compact-row">', unsafe_allow_html=True)
     _cols = st.columns(5)
     for i, (key, icon, label) in enumerate(NAV_ITEMS):
         with _cols[i]:
             _t = "primary" if cur == key else "secondary"
-            # Usa \n per mettere icona sopra e label sotto nel bottone
-            if st.button(f"{icon}\n{label}", key=f"nav_btn_{key}",
-                         use_container_width=True, type=_t):
+            if st.button(icon, key=f"nav_btn_{key}",
+                         use_container_width=True, type=_t, help=label):
                 st.session_state.mob_menu = key
                 st.session_state.selected_act_id = None
                 st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def get_act_micro_comment(row_data, metrics, sport_info) -> str:
