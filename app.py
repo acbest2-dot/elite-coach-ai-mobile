@@ -1589,12 +1589,13 @@ footer { display: none !important; visibility: hidden !important; }
 
 [data-testid="stRadio"] {
     position: fixed !important;
-    bottom: 0 !important; left: 0 !important; right: 0 !important;
+    bottom: 60px !important; left: 0 !important; right: 0 !important;
     z-index: 99999 !important;
     background: #fff !important;
     border-top: 1.5px solid #e8e8e8 !important;
+    border-bottom: 1.5px solid #e8e8e8 !important;
     box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
-    padding: 6px 8px 10px !important;
+    padding: 6px 8px !important;
     margin: 0 !important;
 }
 [data-testid="stRadio"] > div {
@@ -1618,7 +1619,7 @@ footer { display: none !important; visibility: hidden !important; }
 }
 [data-testid="stRadio"] > label,
 [data-testid="stWidgetLabel"] { display: none !important; }
-.block-container { padding-bottom: 80px !important; }
+.block-container { padding-bottom: 130px !important; }
 </style>
 """, unsafe_allow_html=True)
 
