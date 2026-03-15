@@ -146,15 +146,18 @@ st.markdown("""
   [data-testid="collapsedControl"] { display: none !important; }
   section[data-testid="stSidebar"]  { display: none !important; }
 
-  /* ── FADE-IN su ogni cambio pagina ── */
+  /* ── FADE-IN — applicato al primo figlio del block-container ── */
   .block-container {
       padding: 0 0 130px 0 !important;
       max-width: 100% !important;
-      animation: fadeInPage 0.25s ease-out;
+  }
+  /* Il div principale del contenuto Streamlit riceve il fade */
+  [data-testid="stVerticalBlock"] {
+      animation: fadeInPage 0.22s ease-out both;
   }
   @keyframes fadeInPage {
-      from { opacity: 0; transform: translateY(6px); }
-      to   { opacity: 1; transform: translateY(0);   }
+      from { opacity: 0; transform: translateY(5px); }
+      to   { opacity: 1; transform: translateY(0); }
   }
 
   /* ── TOOLBAR HIDE ── */
@@ -164,7 +167,7 @@ st.markdown("""
   .stDeployButton,
   #MainMenu, footer, header { display: none !important; visibility: hidden !important; }
 
-  /* ── HEADER PREMIUM con foto ── */
+  /* ── HEADER PREMIUM ── */
   .mob-header {
       background: linear-gradient(135deg, var(--navy) 0%, var(--blue2) 100%);
       color: white;
@@ -174,13 +177,6 @@ st.markdown("""
       top: 0;
       z-index: 998;
       box-shadow: 0 2px 12px rgba(15,39,68,0.25);
-  }
-  .mob-header h1 {
-      font-size: 18px; font-weight: 800;
-      margin: 0; letter-spacing: -0.3px;
-  }
-  .mob-header p {
-      font-size: 12px; opacity: 0.75; margin: 2px 0 0;
   }
 
   /* ── HERO CARD ── */
@@ -231,59 +227,63 @@ st.markdown("""
   .big-metric .val { font-size: 36px; font-weight: 900; line-height: 1; }
   .big-metric .lbl { font-size: 11px; color: var(--gray400); font-weight: 600; margin-top: 2px; }
 
-  /* ── ATTIVITÀ CARD con sfondo sport ── */
+  /* ── ATTIVITÀ CARD ── */
   .act-card {
       border-radius: 16px;
       padding: 13px 14px 12px;
       margin: 8px 12px 0;
       border-left: 4px solid #ccc;
-      position: relative;
-      overflow: hidden;
+      background: #fff;
       box-shadow: 0 1px 6px rgba(0,0,0,0.06);
   }
-  /* Sfondo tenue per sport */
-  .act-card.sport-run     { background: linear-gradient(135deg, #fff 60%, #fff5f5); border-left-color: #EF4444; }
-  .act-card.sport-bike    { background: linear-gradient(135deg, #fff 60%, #eff6ff); border-left-color: #3B82F6; }
-  .act-card.sport-ski     { background: linear-gradient(135deg, #fff 60%, #f0f9ff); border-left-color: #0EA5E9; }
-  .act-card.sport-hike    { background: linear-gradient(135deg, #fff 60%, #f0fdf4); border-left-color: #22C55E; }
-  .act-card.sport-other   { background: linear-gradient(135deg, #fff 60%, #fafafa); border-left-color: #94A3B8; }
 
   /* TSS progress bar */
   .tss-bar-wrap {
-      margin-top: 8px;
-      height: 4px;
-      background: var(--gray200);
-      border-radius: 4px;
-      overflow: hidden;
+      margin-top: 8px; height: 4px;
+      background: var(--gray200); border-radius: 4px; overflow: hidden;
   }
-  .tss-bar-fill {
-      height: 4px;
-      border-radius: 4px;
-      transition: width 0.4s ease;
-  }
-
-  .act-card-btn-row { margin: 0 12px 0; }
+  .tss-bar-fill { height: 4px; border-radius: 4px; }
 
   .act-title { font-size: 15px; font-weight: 700; color: var(--gray900); margin-bottom: 3px; }
   .act-meta  { font-size: 11px; color: var(--gray400); margin-bottom: 7px; }
-
   .act-pills { display: flex; flex-wrap: wrap; gap: 5px; }
   .act-pill {
-      background: var(--gray100);
-      border-radius: 20px;
-      padding: 3px 9px;
-      font-size: 11px;
-      color: var(--gray700);
-      font-weight: 500;
+      background: var(--gray100); border-radius: 20px;
+      padding: 3px 9px; font-size: 11px; color: var(--gray700); font-weight: 500;
   }
   .act-pill b { color: var(--gray900); }
-
   .zone-chip {
-      display: inline-block;
-      border-radius: 20px;
-      padding: 2px 9px;
-      font-size: 10px;
-      font-weight: 700;
+      display: inline-block; border-radius: 20px;
+      padding: 2px 9px; font-size: 10px; font-weight: 700;
+  }
+
+  /* ── ALERT TOAST ── */
+  .alert-toast {
+      display: flex; align-items: flex-start; gap: 12px;
+      border-radius: 14px; padding: 12px 14px;
+      margin: 8px 12px 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  .alert-toast-icon {
+      font-size: 24px; line-height: 1; flex-shrink: 0; margin-top: 1px;
+  }
+  .alert-toast-title { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+  .alert-toast-msg   { font-size: 12px; opacity: 0.85; line-height: 1.4; }
+
+  /* ── BRIEFING AI — carta warm ── */
+  .briefing-card {
+      background: #FAFAF7;
+      border-radius: 16px;
+      padding: 16px;
+      margin: 8px 0 0;
+      border: 1px solid #EEF0E8;
+      font-size: 14px; line-height: 1.75; color: var(--gray900);
+  }
+  .briefing-signature {
+      margin-top: 12px; padding-top: 10px;
+      border-top: 1px solid #E8EAE0;
+      font-size: 11px; color: var(--gray400);
+      display: flex; align-items: center; gap: 6px;
   }
 
   /* ── AI BOX ── */
@@ -291,29 +291,22 @@ st.markdown("""
       background: var(--gray50);
       border-left: 3px solid var(--blue);
       border-radius: 0 14px 14px 0;
-      padding: 14px 16px;
-      margin: 8px 12px;
-      color: var(--gray900);
-      font-size: 14px;
-      line-height: 1.75;
+      padding: 14px 16px; margin: 8px 12px;
+      color: var(--gray900); font-size: 14px; line-height: 1.75;
   }
 
   /* ── CHAT BUBBLES ── */
   .chat-user {
       background: linear-gradient(135deg, var(--blue) 0%, var(--blue2) 100%);
-      color: white;
-      border-radius: 18px 18px 4px 18px;
-      padding: 10px 14px;
-      margin: 4px 12px 4px 52px;
+      color: white; border-radius: 18px 18px 4px 18px;
+      padding: 10px 14px; margin: 4px 12px 4px 52px;
       font-size: 14px; line-height: 1.5;
       box-shadow: 0 2px 8px rgba(26,86,219,0.25);
   }
   .chat-ai {
-      background: #ffffff;
-      color: var(--gray900);
+      background: #ffffff; color: var(--gray900);
       border-radius: 18px 18px 18px 4px;
-      padding: 10px 14px;
-      margin: 4px 52px 4px 12px;
+      padding: 10px 14px; margin: 4px 52px 4px 12px;
       font-size: 14px; line-height: 1.5;
       box-shadow: 0 1px 6px rgba(0,0,0,0.08);
   }
@@ -321,15 +314,11 @@ st.markdown("""
 
   /* ── BUTTONS ── */
   div[data-testid="stButton"] > button {
-      min-height: 46px !important;
-      font-size: 14px !important;
-      border-radius: 12px !important;
-      font-weight: 600 !important;
+      min-height: 46px !important; font-size: 14px !important;
+      border-radius: 12px !important; font-weight: 600 !important;
       transition: transform 0.1s, box-shadow 0.1s !important;
   }
-  div[data-testid="stButton"] > button:active {
-      transform: scale(0.97) !important;
-  }
+  div[data-testid="stButton"] > button:active { transform: scale(0.97) !important; }
   div[data-testid="stButton"] > button[kind="primary"] {
       background: linear-gradient(135deg, var(--blue) 0%, var(--blue2) 100%) !important;
       border: none !important;
@@ -339,8 +328,7 @@ st.markdown("""
   /* ── INPUTS ── */
   div[data-testid="stTextInput"] input,
   div[data-testid="stChatInput"] textarea {
-      font-size: 16px !important; min-height: 48px !important;
-      border-radius: 12px !important;
+      font-size: 16px !important; min-height: 48px !important; border-radius: 12px !important;
   }
   div[data-testid="stSlider"] { padding: 0 12px; }
 
@@ -2086,30 +2074,35 @@ def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
         elif _dur_h > 1.2: _tag, _tag_color = "Allenamento lungo", "#FF9800"
         else:              _tag, _tag_color = "Allenamento", "#FF9800"
 
+    # Sfondo e bordo inline per sport — più affidabile di CSS classes con Streamlit
+    _sport_styles = {
+        "Run":              ("linear-gradient(135deg,#fff 55%,#fff1f1)", "#EF4444"),
+        "TrailRun":         ("linear-gradient(135deg,#fff 55%,#fff4ee)", "#F97316"),
+        "Ride":             ("linear-gradient(135deg,#fff 55%,#eff6ff)", "#3B82F6"),
+        "VirtualRide":      ("linear-gradient(135deg,#fff 55%,#f0f4ff)", "#6366F1"),
+        "MountainBikeRide": ("linear-gradient(135deg,#fff 55%,#eef2ff)", "#4F46E5"),
+        "BackcountrySki":   ("linear-gradient(135deg,#fff 55%,#f0f9ff)", "#0EA5E9"),
+        "AlpineSki":        ("linear-gradient(135deg,#fff 55%,#f0f9ff)", "#38BDF8"),
+        "Hike":             ("linear-gradient(135deg,#fff 55%,#f0fdf4)", "#22C55E"),
+    }
+    _bg_style, _border_color = _sport_styles.get(_atype, ("#fff", "#94A3B8"))
+
     _tag_html = (
         f' &nbsp;<span style="background:{_tag_color}22;color:{_tag_color};'
         f'border-radius:20px;padding:2px 8px;font-size:10px;font-weight:700">{_tag}</span>'
         if _tag else ""
     )
 
-    # Classe CSS per sfondo sport
-    _sport_cls = {
-        "Run": "sport-run", "TrailRun": "sport-run",
-        "Ride": "sport-bike", "VirtualRide": "sport-bike", "MountainBikeRide": "sport-bike",
-        "BackcountrySki": "sport-ski", "AlpineSki": "sport-ski",
-        "Hike": "sport-hike",
-    }.get(_atype, "sport-other")
-
-    # Barra TSS — proporzionale al max TSS dell'atleta (stima 150 come riferimento alto)
+    # Barra TSS inline
     _tss_pct = min(100, int(_tss_val / 150 * 100))
     _tss_bar = (
-        f'<div class="tss-bar-wrap">'
-        f'<div class="tss-bar-fill" style="width:{_tss_pct}%;background:{_zc}"></div>'
+        f'<div style="margin-top:8px;height:4px;background:#E2E8F0;border-radius:4px;overflow:hidden">'
+        f'<div style="width:{_tss_pct}%;height:4px;border-radius:4px;background:{_zc}"></div>'
         f'</div>'
     )
 
     card_html = f"""
-<div class="act-card {_sport_cls}">
+<div class="act-card" style="background:{_bg_style};border-left-color:{_border_color}">
   {_header_html}
   <div class="act-title">{s["icon"]} {str(row_data["name"])}</div>
   <div class="act-meta">{_date} &middot;
@@ -2133,10 +2126,38 @@ token_ok = refresh_token_if_needed()
 
 if not token_ok:
     st.markdown("""
-    <div style="text-align:center;padding:60px 24px 40px">
-        <div style="font-size:64px;margin-bottom:16px">🏆</div>
-        <h1 style="font-size:26px;font-weight:900;color:#1565C0;margin-bottom:8px">Elite AI Coach</h1>
-        <p style="color:#666;font-size:15px;margin-bottom:32px">Il tuo coach AI personale.<br>Connetti Strava per iniziare.</p>
+    <style>
+    html, body, [data-testid="stAppViewContainer"], .block-container {
+        background: #0F2744 !important;
+        padding: 0 !important;
+    }
+    </style>
+    <div style="min-height:100vh;background:linear-gradient(160deg,#0F2744 0%,#1e3a5f 100%);
+                display:flex;flex-direction:column;align-items:center;justify-content:center;
+                padding:48px 24px;text-align:center">
+
+      <!-- Logo -->
+      <div style="width:80px;height:80px;background:rgba(255,255,255,0.1);
+                  border-radius:24px;display:flex;align-items:center;justify-content:center;
+                  font-size:40px;margin-bottom:24px;
+                  box-shadow:0 8px 32px rgba(0,0,0,0.3)">🏆</div>
+
+      <div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-0.5px;
+                  margin-bottom:8px">Elite AI Coach</div>
+      <div style="font-size:15px;color:rgba(255,255,255,0.55);margin-bottom:12px;
+                  max-width:280px;line-height:1.5">
+        Il tuo coach personale.<br>Analisi, piani e coaching basati sui tuoi dati reali.
+      </div>
+
+      <!-- Feature pills -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:40px">
+        <span style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);
+                     border-radius:20px;padding:4px 12px;font-size:12px">📊 CTL/ATL/TSB</span>
+        <span style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);
+                     border-radius:20px;padding:4px 12px;font-size:12px">🤖 Coach AI</span>
+        <span style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);
+                     border-radius:20px;padding:4px 12px;font-size:12px">📅 Piani 7gg</span>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2147,14 +2168,19 @@ if not token_ok:
             f"&response_type=code&scope=read,activity:read_all"
         )
         st.markdown(f"""
-        <div style="text-align:center;padding:0 24px">
+        <div style="position:fixed;bottom:40px;left:24px;right:24px;text-align:center">
             <a href="{auth_url}" style="
-                display:block;background:#FC4C02;color:white;
-                border-radius:14px;padding:16px;font-size:17px;
-                font-weight:700;text-decoration:none;
-                box-shadow:0 4px 16px rgba(252,76,2,0.35)">
+                display:block;
+                background:linear-gradient(135deg,#FC4C02,#e84300);
+                color:white;border-radius:16px;padding:18px;
+                font-size:17px;font-weight:700;text-decoration:none;
+                box-shadow:0 8px 24px rgba(252,76,2,0.45);
+                letter-spacing:0.2px">
                 🔗 Connetti Strava
             </a>
+            <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:12px">
+              Dati sicuri · Solo lettura · Nessuna modifica
+            </div>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -2869,41 +2895,45 @@ if st.session_state.mob_menu == "dashboard":
         unsafe_allow_html=True
     )
 
-    # ── Alert proattivi ──
+    # ── Alert proattivi — stile toast ──
     _alerts = get_proactive_alerts(df, current_ctl, current_atl, current_tsb, u)
-    _alert_colors = {
-        "success": ("#E8F5E9", "#2E7D32", "#4CAF50"),
-        "warning": ("#FFF3E0", "#E65100", "#FF9800"),
-        "info":    ("#E3F2FD", "#1565C0", "#2196F3"),
+    _alert_cfg = {
+        "success": ("#F0FDF4", "#15803D", "#DCFCE7"),
+        "warning": ("#FFF7ED", "#C2410C", "#FED7AA"),
+        "info":    ("#EFF6FF", "#1D4ED8", "#DBEAFE"),
     }
     for _al in _alerts:
-        _bg, _tc, _bc = _alert_colors.get(_al["type"], _alert_colors["info"])
+        _bg, _tc, _ic_bg = _alert_cfg.get(_al["type"], _alert_cfg["info"])
         st.markdown(
-            f'<div style="background:{_bg};border-left:4px solid {_bc};border-radius:0 12px 12px 0;'
-            f'padding:10px 14px;margin:8px 12px 0">'
-            f'<div style="font-size:13px;font-weight:700;color:{_tc}">{_al["icon"]} {_al["title"]}</div>'
-            f'<div style="font-size:12px;color:{_tc};opacity:0.85;margin-top:3px">{_al["msg"]}</div>'
-            f'</div>',
+            f'<div class="alert-toast" style="background:{_bg}">'
+            f'<div class="alert-toast-icon" style="background:{_ic_bg};'
+            f'width:40px;height:40px;border-radius:12px;display:flex;'
+            f'align-items:center;justify-content:center;font-size:20px;flex-shrink:0">'
+            f'{_al["icon"]}</div>'
+            f'<div>'
+            f'<div class="alert-toast-title" style="color:{_tc}">{_al["title"]}</div>'
+            f'<div class="alert-toast-msg" style="color:{_tc}">{_al["msg"]}</div>'
+            f'</div></div>',
             unsafe_allow_html=True)
 
     _w7_metrics = [
-        ("⏱", f"{_w7_hrs:.1f}h", "ore attività"),
-        ("📏", f"{_w7_km:.0f}", "km totali"),
-        ("⛰", f"{_w7_elev/1000:.1f}k", "metri D+"),
-        ("🔥", f"{_w7_kcal:.0f}", "kcal stimate"),
-        ("📊", f"{_w7_tss:.0f}", "TSS carico"),
-        ("🏅", f"{_w7_n}", f"sessioni {_sport_icons}"),
+        ("⏱", f"{_w7_hrs:.1f}h",         "ore attività",   "#3B82F6", "#EFF6FF"),
+        ("📏", f"{_w7_km:.0f}",           "km totali",      "#10B981", "#ECFDF5"),
+        ("⛰",  f"{_w7_elev/1000:.1f}k",  "metri D+",       "#8B5CF6", "#F5F3FF"),
+        ("🔥", f"{_w7_kcal:.0f}",         "kcal",           "#F97316", "#FFF7ED"),
+        ("📊", f"{_w7_tss:.0f}",          "TSS",            "#1A56DB", "#EFF6FF"),
+        ("🏅", f"{_w7_n}",                f"sessioni",       "#0F2744", "#F1F5F9"),
     ]
     _recap_html = (
         '<div class="mob-card" style="margin-top:8px">'
         '<div class="mob-card-title">📆 Ultimi 7 giorni</div>'
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px">'
     )
-    for _ico, _val, _lbl in _w7_metrics:
+    for _ico, _val, _lbl, _mc, _mbg in _w7_metrics:
         _recap_html += (
-            f'<div style="background:#f8f9fa;border-radius:10px;padding:8px 6px;text-align:center">'
-            f'<div style="font-size:12px;color:#888;margin-bottom:3px">{_ico} {_lbl}</div>'
-            f'<div style="font-size:20px;font-weight:900;color:#1a1a1a;line-height:1">{_val}</div>'
+            f'<div style="background:{_mbg};border-radius:12px;padding:10px 8px;text-align:center">'
+            f'<div style="font-size:11px;color:{_mc};opacity:0.7;margin-bottom:3px;font-weight:600">{_ico} {_lbl}</div>'
+            f'<div style="font-size:22px;font-weight:900;color:{_mc};line-height:1">{_val}</div>'
             f'</div>'
         )
     _recap_html += '</div></div>'
@@ -2921,7 +2951,6 @@ if st.session_state.mob_menu == "dashboard":
         if _bkey in st.session_state:
             _bt = st.session_state[_bkey]
             if not str(_bt).startswith("⚠️"):
-                # Formatta le 3 sezioni con separatori visivi
                 _sections = str(_bt).split("\n")
                 _formatted = ""
                 for _line in _sections:
@@ -2929,25 +2958,29 @@ if st.session_state.mob_menu == "dashboard":
                     if not _l:
                         _formatted += "<br>"
                     elif any(_l.startswith(str(n) + ".") for n in [1, 2, 3]):
-                        # Titolo sezione
                         _formatted += (
-                            f'<div style="font-size:11px;font-weight:800;color:#1565C0;'
-                            f'text-transform:uppercase;letter-spacing:0.5px;'
-                            f'margin:10px 0 4px;border-bottom:1px solid #e3f2fd;padding-bottom:3px">'
-                            f'{_l}</div>'
+                            f'<div style="font-size:10px;font-weight:800;color:#1A56DB;'
+                            f'text-transform:uppercase;letter-spacing:0.7px;'
+                            f'margin:12px 0 4px;padding-bottom:3px;'
+                            f'border-bottom:1px solid #E8EAE0">{_l}</div>'
                         )
                     else:
                         _formatted += f'<span>{_l}</span><br>'
+
                 st.markdown(
                     '<div class="mob-card" style="margin-top:8px">'
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-                    '<div class="mob-card-title" style="margin:0">🤖 BRIEFING COACH · OGGI</div>'
-                    f'<div style="font-size:10px;color:#bbb">{datetime.now().strftime("%d/%m")}</div>'
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+                    '<div class="mob-card-title" style="margin:0">🤖 Briefing Coach</div>'
+                    f'<div style="font-size:10px;color:#94A3B8">{datetime.now().strftime("%d %b %Y")}</div>'
                     '</div>'
-                    f'<div style="font-size:14px;line-height:1.7;color:#212529">{_formatted}</div>'
+                    f'<div class="briefing-card">{_formatted}'
+                    f'<div class="briefing-signature">'
+                    f'<span style="font-size:18px">🏆</span>'
+                    f'<span>Elite Coach AI · generato oggi</span>'
+                    f'</div></div>'
                     '<div style="margin-top:10px;text-align:right">',
                     unsafe_allow_html=True)
-                if st.button("🔄 Rigenera briefing", key="regen_brief", use_container_width=False):
+                if st.button("🔄 Rigenera", key="regen_brief", use_container_width=False):
                     if _bkey in st.session_state:
                         del st.session_state[_bkey]
                     st.rerun()
@@ -3050,21 +3083,37 @@ elif st.session_state.mob_menu == "fitness":
     }).dropna().tail(60)
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(x=pmc_df.index, y=pmc_df["CTL"],
-        name="CTL", line=dict(color="#4CAF50", width=2.5)))
+        name="CTL", line=dict(color="#34D399", width=2.5)))
     fig2.add_trace(go.Scatter(x=pmc_df.index, y=pmc_df["ATL"],
-        name="ATL", line=dict(color="#F44336", width=2.5)))
+        name="ATL", line=dict(color="#FB923C", width=2.5)))
     fig2.add_trace(go.Scatter(x=pmc_df.index, y=pmc_df["TSB"],
-        name="TSB", line=dict(color="#2196F3", width=2),
-        fill="tozeroy", fillcolor="rgba(33,150,243,0.07)"))
-    fig2.add_hline(y=0, line_dash="dot", line_color="#aaa", line_width=1)
+        name="TSB", line=dict(color="#60A5FA", width=2),
+        fill="tozeroy", fillcolor="rgba(96,165,250,0.10)"))
+    fig2.add_hline(y=0, line_dash="dot", line_color="rgba(255,255,255,0.2)", line_width=1)
     fig2.update_layout(
         height=220, margin=dict(l=0,r=0,t=8,b=0),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", y=-0.25, font_size=11),
-        xaxis=dict(gridcolor="rgba(0,0,0,0.05)", tickfont_size=10),
-        yaxis=dict(gridcolor="rgba(0,0,0,0.05)", tickfont_size=10),
+        paper_bgcolor="#0F2744",
+        plot_bgcolor="#0F2744",
+        legend=dict(
+            orientation="h", y=-0.28, font_size=11,
+            font_color="rgba(255,255,255,0.6)",
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        xaxis=dict(
+            gridcolor="rgba(255,255,255,0.06)",
+            tickfont=dict(size=10, color="rgba(255,255,255,0.4)"),
+            linecolor="rgba(255,255,255,0.1)",
+        ),
+        yaxis=dict(
+            gridcolor="rgba(255,255,255,0.06)",
+            tickfont=dict(size=10, color="rgba(255,255,255,0.4)"),
+        ),
     )
+    st.markdown(
+        '<div style="background:#0F2744;border-radius:14px;overflow:hidden;margin:4px 0">',
+        unsafe_allow_html=True)
     st.plotly_chart(fig2, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Fitness per sport ──
@@ -3152,21 +3201,61 @@ elif st.session_state.mob_menu == "fitness":
         </div>
         </div>""", unsafe_allow_html=True)
 
-    # Volume settimanale ultimi 8 settimane
+    # Volume settimanale ultimi 8 settimane — grafico premium
     st.markdown('<div class="mob-card"><div class="mob-card-title">📅 Volume settimanale (TSS)</div>',
                 unsafe_allow_html=True)
     weekly = tss_daily.resample("W").sum().tail(8)
-    fig3   = go.Figure(go.Bar(
-        x=[d.strftime("S%V") for d in weekly.index],
+    _avg_tss_w = float(weekly.mean()) if len(weekly) > 0 else 100
+
+    # Colore per barra in base all'intensità relativa alla media
+    _bar_colors = []
+    for _v in weekly.values:
+        if _v >= _avg_tss_w * 1.15:   _bar_colors.append("#1A56DB")   # sopra media → blu
+        elif _v >= _avg_tss_w * 0.85: _bar_colors.append("#6366F1")   # media → indaco
+        elif _v >= _avg_tss_w * 0.5:  _bar_colors.append("#94A3B8")   # sotto media → grigio
+        else:                          _bar_colors.append("#E2E8F0")   # molto basso → grigio chiaro
+
+    _week_labels = []
+    for d in weekly.index:
+        _week_labels.append(d.strftime("%d/%m"))
+
+    fig3 = go.Figure()
+    fig3.add_trace(go.Bar(
+        x=_week_labels,
         y=weekly.values,
-        marker_color="#2196F3",
-        marker_opacity=0.8,
+        marker_color=_bar_colors,
+        marker_line_width=0,
+        text=[f"{int(v)}" for v in weekly.values],
+        textposition="outside",
+        textfont=dict(size=10, color="#64748B"),
     ))
+    # Linea media
+    fig3.add_hline(
+        y=_avg_tss_w,
+        line_dash="dot",
+        line_color="rgba(100,116,139,0.4)",
+        line_width=1.5,
+        annotation_text=f"media {_avg_tss_w:.0f}",
+        annotation_font_size=9,
+        annotation_font_color="#94A3B8",
+        annotation_position="top right",
+    )
     fig3.update_layout(
-        height=160, margin=dict(l=0,r=0,t=4,b=0),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(gridcolor="rgba(0,0,0,0)", tickfont_size=10),
-        yaxis=dict(gridcolor="rgba(0,0,0,0.05)", tickfont_size=10),
+        height=180,
+        margin=dict(l=0, r=0, t=28, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        bargap=0.35,
+        xaxis=dict(
+            gridcolor="rgba(0,0,0,0)",
+            tickfont=dict(size=10, color="#94A3B8"),
+            tickangle=0,
+        ),
+        yaxis=dict(
+            gridcolor="rgba(0,0,0,0)",
+            visible=False,
+        ),
+        showlegend=False,
     )
     st.plotly_chart(fig3, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
@@ -3426,7 +3515,7 @@ elif st.session_state.mob_menu == "chat":
     @keyframes bounce { 0%,80%,100%{transform:scale(0.7);opacity:0.5} 40%{transform:scale(1);opacity:1} }
     .qp-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px 12px 0; }
     div[data-testid="stChatInput"] {
-        position:sticky !important; bottom:88px !important;
+        position:sticky !important; bottom:115px !important;
         background:#f0f2f6 !important; padding:8px 0 4px !important; z-index:998 !important;
     }
     /* Piano strutturato */
