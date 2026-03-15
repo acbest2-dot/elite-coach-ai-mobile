@@ -149,7 +149,7 @@ st.markdown("""
       padding: 14px 20px 10px;
       margin-bottom: 0;
       position: sticky;
-      top: 0;
+      top: 52px;
       z-index: 998;
   }
   .mob-header h1 {
@@ -1570,96 +1570,90 @@ NAV_ITEMS = [
 
 def render_bottom_nav():
     """
-    FAB hamburger menu — un singolo pulsante fisso in basso a sinistra.
-    Cliccato apre/chiude un menu con le 5 voci. Usa solo st.button → no session reset.
+    Nav bar fissa in ALTO — icone piccole orizzontali sempre visibili.
+    HTML decorativo fisso + bottoni Streamlit invisibili sovrapposti per i click.
     """
     cur = st.session_state.mob_menu
-    _open = st.session_state.get("_nav_open", False)
 
-    # CSS per il FAB e il menu espandibile
-    st.markdown("""
+    # ── HTML decorativo fissato in alto ──
+    _items_html = ""
+    for key, icon, label in NAV_ITEMS:
+        _bg  = "background:#E3F2FD;" if cur == key else ""
+        _col = "color:#1565C0;" if cur == key else "color:#666;"
+        _items_html += (
+            f'<div style="flex:1;display:flex;flex-direction:column;align-items:center;'
+            f'justify-content:center;padding:4px 2px;border-radius:8px;{_bg}">'
+            f'<span style="font-size:18px;line-height:1">{icon}</span>'
+            f'<span style="font-size:9px;font-weight:600;margin-top:1px;{_col}">{label}</span>'
+            f'</div>'
+        )
+
+    st.markdown(f"""
 <style>
-/* FAB button container */
-#fab-anchor + div [data-testid="stButton"]:last-child {
-    position: fixed !important;
-    bottom: 20px !important;
-    left: 16px !important;
-    z-index: 99999 !important;
-    width: 52px !important;
-    height: 52px !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-#fab-anchor + div [data-testid="stButton"]:last-child button {
-    width: 52px !important;
-    height: 52px !important;
-    min-height: 52px !important;
-    border-radius: 50% !important;
-    font-size: 22px !important;
-    padding: 0 !important;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.20) !important;
-    border: none !important;
-    background: #1565C0 !important;
-    color: #fff !important;
-}
-/* Menu espandibile sopra il FAB */
-.fab-menu {
-    position: fixed !important;
-    bottom: 82px !important;
-    left: 10px !important;
-    z-index: 99998 !important;
-    background: #ffffff !important;
-    border: 1.5px solid #e0e0e0 !important;
-    border-radius: 14px !important;
-    box-shadow: 0 8px 28px rgba(0,0,0,0.15) !important;
-    padding: 6px !important;
-    min-width: 160px !important;
-}
-.fab-menu-item {
+/* Barra nav decorativa fissa in alto */
+.top-nav-bar {{
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 52px;
+    background: #ffffff;
+    border-bottom: 1px solid #e8e8e8;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.07);
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 9px 14px;
-    border-radius: 10px;
-    font-size: 14px;
-    font-weight: 600;
-    color: #1a1a1a;
-    cursor: pointer;
-}
-.fab-menu-item.active {
-    background: #E3F2FD;
-    color: #1565C0;
-}
-.fab-menu-item:not(.active):hover {
-    background: #f5f5f5;
-}
-.fab-menu-icon { font-size: 18px; }
+    z-index: 99999;
+    padding: 2px 4px;
+    pointer-events: none;
+}}
+/* Sposta il contenuto sotto la nav */
+.block-container {{
+    padding-top: 60px !important;
+    padding-bottom: 20px !important;
+}}
+/* Bottoni Streamlit sovrapposti alla nav — invisibili ma cliccabili */
+#nav-btns-anchor + div {{
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important;
+    height: 52px !important;
+    z-index: 100000 !important;
+    background: transparent !important;
+    padding: 2px 4px !important;
+    margin: 0 !important;
+    display: flex !important;
+}}
+#nav-btns-anchor + div > div[data-testid="stHorizontalBlock"] {{
+    width: 100% !important;
+    gap: 2px !important;
+    flex-wrap: nowrap !important;
+    background: transparent !important;
+}}
+#nav-btns-anchor + div > div[data-testid="stHorizontalBlock"] > div {{
+    padding: 0 !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+}}
+#nav-btns-anchor + div > div[data-testid="stHorizontalBlock"] button {{
+    opacity: 0 !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    width: 100% !important;
+    border: none !important;
+    background: transparent !important;
+    cursor: pointer !important;
+}}
 </style>
+<div class="top-nav-bar">{_items_html}</div>
 """, unsafe_allow_html=True)
 
-    # Menu espandibile (solo se aperto) — SOPRA il FAB, bottoni Streamlit reali
-    if _open:
-        st.markdown('<div class="fab-menu">', unsafe_allow_html=True)
-        for key, icon, label in NAV_ITEMS:
-            _active_cls = "active" if cur == key else ""
-            st.markdown(
-                f'<div class="fab-menu-item {_active_cls}">'
-                f'<span class="fab-menu-icon">{icon}</span>{label}</div>',
-                unsafe_allow_html=True)
-            if st.button(f"{icon} {label}", key=f"nav_item_{key}",
-                         use_container_width=True):
+    # Bottoni Streamlit reali — trasparenti, sovrapposti alla nav decorativa
+    st.markdown('<div id="nav-btns-anchor"></div>', unsafe_allow_html=True)
+    _cols = st.columns(5)
+    for i, (key, icon, label) in enumerate(NAV_ITEMS):
+        with _cols[i]:
+            if st.button(label, key=f"nav_btn_{key}", use_container_width=True):
                 st.session_state.mob_menu = key
                 st.session_state.selected_act_id = None
                 st.session_state["_nav_open"] = False
                 st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # FAB button — ancora + bottone fisso
-    st.markdown('<div id="fab-anchor"></div>', unsafe_allow_html=True)
-    _fab_icon = "✕" if _open else "☰"
-    if st.button(_fab_icon, key="fab_nav_toggle"):
-        st.session_state["_nav_open"] = not _open
-        st.rerun()
 
 
 def get_act_micro_comment(row_data, metrics, sport_info) -> str:
@@ -1705,19 +1699,19 @@ def get_act_micro_comment(row_data, metrics, sport_info) -> str:
     _facts_str = ", ".join(_facts[:2]) if _facts else ""  # max 2 dati
 
     _prompt = (
-        f"Sport: {_type}. Nome attività: '{_name}'. "
-        f"Durata: {m['dur_str']}, distanza: {m['dist_str']}, passo/velocità: {_pace}, "
-        f"FC media: {_hr_avg} bpm, dislivello: {m['elev']}, TSS: {_tss}"
-        + (f". Dati extra: {_facts_str}" if _facts_str else "") + ".\n\n"
-        "Scrivi UNA frase brevissima (5-8 parole) SPECIFICA su questa uscita.\n"
-        "Scegli IL DATO PIÙ INTERESSANTE tra quelli disponibili — può essere qualsiasi cosa:\n"
-        "- Luogo geografico nel nome (monte, passo, vallata) → usalo\n"
-        "- Picco potenza o velocità massima notevole → citalo\n"
-        "- Dislivello elevato (es. >1500m) → citalo\n"
-        "- FC media alta o bassa rispetto alla durata → commentalo\n"
-        "- Tipo di sforzo (Z2 lungo, soglia, recupero, interval) → descrivilo\n"
-        "Non citare sempre lo stesso tipo di dato. Varia in base a cosa spicca davvero.\n"
-        "Solo la frase, niente punteggiatura finale."
+        f"Dati uscita: sport={_type}, nome='{_name}', "
+        f"distanza={m['dist_str']}, durata={m['dur_str']}, "
+        f"passo/velocità={_pace}, FC media={_hr_avg} bpm, "
+        f"dislivello={m['elev']}, TSS={_tss}"
+        + (f", {_facts_str}" if _facts_str else "") + ".\n\n"
+        "Scrivi UNA frase di massimo 8 parole su questa uscita.\n"
+        "REGOLA FONDAMENTALE: usa SEMPRE i numeri reali dall'elenco sopra. "
+        "Vietato usare aggettivi vaghi come 'ottimo', 'buono', 'bel'. "
+        "Esempi corretti: '800m D+ in 28km a 5:10/km' — '42km a 26 km/h FC 142bpm' — "
+        "'Giro del Velino 1400m D+' — 'Intervalli: FC max 178bpm TSS 85' — "
+        "'Lungo Z2: 2h15 a 155bpm'.\n"
+        "Scegli il dato che spicca di più (geografico, potenza, velocità, FC, dislivello se alto).\n"
+        "Solo la frase, nessuna punteggiatura finale."
     )
     try:
         _res = ai_generate(_prompt, max_tokens=40)
