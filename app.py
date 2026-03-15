@@ -1568,6 +1568,74 @@ NAV_ITEMS = [
     ("profilo",   "👤", "Profilo"),
 ]
 
+def render_bottom_nav():
+    """
+    Bottom nav 100% HTML+JS puro — funziona su desktop e mobile Chrome/Safari.
+    Usa window.location per cambiare il query param ?nav=X che Streamlit legge.
+    """
+    cur = st.session_state.mob_menu
+
+    # Leggi il nav param dalla URL (se presente)
+    _nav_param = st.query_params.get("nav", "")
+    if _nav_param and _nav_param != cur:
+        valid_keys = [k for k, _, _ in NAV_ITEMS]
+        if _nav_param in valid_keys:
+            st.session_state.mob_menu = _nav_param
+            st.session_state.selected_act_id = None
+            st.query_params.clear()
+            st.rerun()
+
+    # Costruisci i tab HTML
+    _tabs_html = ""
+    for key, icon, label in NAV_ITEMS:
+        _active = "nav-active" if cur == key else ""
+        _tabs_html += (
+            f'<a class="nav-tab {_active}" href="?nav={key}" '
+            f'onclick="navGo(event,\'{key}\')" title="{label}">'
+            f'<span class="nav-icon">{icon}</span>'
+            f'</a>'
+        )
+
+    st.markdown(f"""
+<style>
+.bottom-nav-bar {{
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 56px;
+    background: #ffffff;
+    border-top: 1.5px solid #e8e8e8;
+    box-shadow: 0 -2px 16px rgba(0,0,0,0.09);
+    display: flex;
+    z-index: 99999;
+    padding: 0 4px 6px;
+}}
+.nav-tab {{
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    border-radius: 10px;
+    margin: 4px 2px 0;
+    transition: background 0.12s;
+    -webkit-tap-highlight-color: transparent;
+}}
+.nav-tab:hover {{ background: #f0f0f0; }}
+.nav-active {{ background: #E3F2FD !important; }}
+.nav-icon {{ font-size: 22px; line-height: 1; }}
+</style>
+<div class="bottom-nav-bar">{_tabs_html}</div>
+<script>
+function navGo(e, key) {{
+    e.preventDefault();
+    var url = new URL(window.location.href);
+    url.searchParams.set('nav', key);
+    window.location.href = url.toString();
+}}
+</script>
+""", unsafe_allow_html=True)
+
+
 def render_act_card(row_data, metrics, sport_info, zone_color, zone_label,
                     act_id, header_label="", key_prefix="act"):
     """
