@@ -546,27 +546,54 @@ def compute_fitness(df):
     tsb_mapped = df_dates.map(tsb)
     return ctl_mapped, atl_mapped, tsb_mapped, ctl, atl, tsb, daily
 
-def calc_vo2max_estimate(df_sorted):
-    """VO2max stimato — vettorizzato con numpy, non più iterrows()."""
+def calc_vo2max_estimate(df_sorted, ftp=200, peso=75):
+    """
+    VO2max stimato — prende il massimo tra stima da corsa e stima da bici.
+    
+    Corsa: formula Daniels da velocità e durata.
+    Bici: formula da FTP — VO2max ≈ (FTP_W/kg × 10.8 + 7) / 1.064
+    Source: Coggan, "Training and Racing with a Power Meter"
+    """
+    best_run = 0.0
+    best_bike = 0.0
+
+    # ── Stima da corsa (Daniels) ──
     runs = df_sorted[
         (df_sorted["type"].isin(["Run","TrailRun"])) &
         (df_sorted["distance"] >= 5000)
     ]
-    if runs.empty:
-        return None
-    time_min = runs["moving_time"] / 60
-    dist_m   = runs["distance"]
-    valid    = time_min > 0
-    if not valid.any():
-        return None
-    time_min = time_min[valid]
-    dist_m   = dist_m[valid]
-    vel  = dist_m / time_min
-    pct  = (0.8 + 0.1894393 * np.exp(-0.012778 * time_min)
-               + 0.2989558 * np.exp(-0.1932605 * time_min))
-    vo2  = -4.60 + 0.182258 * vel + 0.000104 * vel**2
-    vo2max_arr = np.where(pct > 0, vo2 / pct, 0)
-    best = float(np.max(vo2max_arr))
+    if not runs.empty:
+        time_min = runs["moving_time"] / 60
+        dist_m   = runs["distance"]
+        valid    = time_min > 0
+        if valid.any():
+            time_min = time_min[valid]
+            dist_m   = dist_m[valid]
+            vel  = dist_m / time_min
+            pct  = (0.8 + 0.1894393 * np.exp(-0.012778 * time_min)
+                       + 0.2989558 * np.exp(-0.1932605 * time_min))
+            vo2  = -4.60 + 0.182258 * vel + 0.000104 * vel**2
+            arr  = np.where(pct > 0, vo2 / pct, 0)
+            best_run = float(np.max(arr))
+
+    # ── Stima da bici (FTP/peso) ──
+    # Usa le uscite bici reali se hanno potenza, altrimenti usa FTP da profilo
+    rides = df_sorted[
+        df_sorted["type"].isin(["Ride","VirtualRide","MountainBikeRide"]) &
+        df_sorted["average_watts"].notna()
+    ]
+    if not rides.empty and peso > 0:
+        # Best 20-min power proxy: usa i top 10% per watt medi
+        top_watts = rides["average_watts"].quantile(0.90)
+        ftp_est   = top_watts * 0.95  # FTP ≈ 95% del best 60min ≈ 97% del best 20min
+        wkg       = max(ftp_est, ftp) / peso  # prende il più alto tra stimato e dichiarato
+        best_bike = (wkg * 10.8 + 7) / 1.064
+    elif ftp > 0 and peso > 0:
+        # Fallback: solo FTP dal profilo
+        wkg       = ftp / peso
+        best_bike = (wkg * 10.8 + 7) / 1.064
+
+    best = max(best_run, best_bike)
     return round(best, 1) if best > 0 else None
 
 # ============================================================
@@ -1557,6 +1584,125 @@ if _act_param:
     st.query_params.clear()
     # Non serve rerun — la pagina si renderizza con il nuovo selected_act_id
 
+def compute_fitness_by_sport(df: pd.DataFrame) -> dict:
+    """
+    Calcola CTL/ATL/TSB separati per corsa, bici e montagna.
+    Ritorna dict con chiavi 'run', 'bike', 'mountain', ognuna con (ctl, atl, tsb, ctl_daily).
+    """
+    sport_groups = {
+        "run":      df["type"].isin(["Run", "TrailRun"]),
+        "bike":     df["type"].isin(["Ride", "VirtualRide", "MountainBikeRide"]),
+        "mountain": df["type"].isin(["BackcountrySki", "AlpineSki", "Hike"]),
+    }
+    icons = {"run": "🏃", "bike": "🚴", "mountain": "🎿"}
+    labels = {"run": "Corsa", "bike": "Ciclismo", "mountain": "Montagna"}
+    result = {}
+    for key, mask in sport_groups.items():
+        sub = df[mask]
+        if sub.empty:
+            result[key] = None
+            continue
+        ctl_s, atl_s, tsb_s, ctl_d, atl_d, tsb_d, _ = compute_fitness(sub)
+        result[key] = {
+            "ctl": float(ctl_s.iloc[-1]) if len(ctl_s) > 0 else 0,
+            "atl": float(atl_s.iloc[-1]) if len(atl_s) > 0 else 0,
+            "tsb": float(tsb_s.iloc[-1]) if len(tsb_s) > 0 else 0,
+            "ctl_daily": ctl_d,
+            "atl_daily": atl_d,
+            "tsb_daily": tsb_d,
+            "icon": icons[key],
+            "label": labels[key],
+            "n": len(sub),
+        }
+    return result
+
+
+def get_proactive_alerts(df: pd.DataFrame, current_ctl: float, current_atl: float,
+                          current_tsb: float, u: dict) -> list:
+    """
+    Genera alert proattivi basati su regole deterministiche.
+    Ritorna lista di dict con: tipo (warning/info/success), titolo, messaggio.
+    """
+    alerts = []
+    now = df["start_date"].max()
+
+    # Giorni senza allenamento
+    last_act = df.iloc[-1]
+    days_off = (datetime.now() - last_act["start_date"]).days
+
+    # Trend CTL 14gg
+    df14 = df[df["start_date"] >= now - pd.Timedelta(days=14)]
+    ctl_delta = 0.0
+    if len(df14) >= 2:
+        ctl_delta = float(df14["ctl"].iloc[-1]) - float(df14["ctl"].iloc[0])
+
+    # TSS settimana corrente vs precedente
+    df_w0 = df[df["start_date"] >= now - pd.Timedelta(days=7)]
+    df_w1 = df[(df["start_date"] >= now - pd.Timedelta(days=14)) &
+               (df["start_date"] < now - pd.Timedelta(days=7))]
+    tss_w0 = df_w0["tss"].sum()
+    tss_w1 = df_w1["tss"].sum()
+    tss_drop_pct = ((tss_w1 - tss_w0) / tss_w1 * 100) if tss_w1 > 0 else 0
+
+    # ── Regole ──
+
+    # Fresco e fermo da 2+ giorni → ottimo momento per caricare
+    if current_tsb > 10 and days_off >= 2:
+        alerts.append({
+            "type": "success",
+            "icon": "🟢",
+            "title": f"Sei fresco (+{current_tsb:.0f} TSB) — {days_off} giorni di riposo",
+            "msg": "Condizione ideale per una sessione di qualità o di carico. Non aspettare troppo."
+        })
+
+    # Troppo riposo con forma alta → rischio de-training
+    if days_off >= 5 and current_ctl > 40:
+        alerts.append({
+            "type": "warning",
+            "icon": "⚠️",
+            "title": f"{days_off} giorni senza allenamento",
+            "msg": f"CTL attuale {current_ctl:.0f} — dopo 7+ giorni inizia il de-training. Anche 30 min aiutano."
+        })
+
+    # Sovraccarico: TSB molto negativo
+    if current_tsb < -25:
+        alerts.append({
+            "type": "warning",
+            "icon": "🔴",
+            "title": f"Sovraccarico: TSB {current_tsb:.0f}",
+            "msg": "Fatica accumulata alta. Priorità al recupero: sonno, alimentazione, sessione leggera al massimo."
+        })
+
+    # CTL in calo sostenuto
+    if ctl_delta < -5:
+        alerts.append({
+            "type": "info",
+            "icon": "📉",
+            "title": f"CTL calato di {abs(ctl_delta):.0f} punti in 14 giorni",
+            "msg": "Fase di scarico o pausa? Se involontario, valuta di aumentare gradualmente il volume."
+        })
+
+    # TSS settimana molto basso rispetto alla precedente
+    if tss_drop_pct > 40 and tss_w1 > 30:
+        alerts.append({
+            "type": "info",
+            "icon": "📊",
+            "title": f"Carico settimanale -{ tss_drop_pct:.0f}% vs settimana scorsa",
+            "msg": f"TSS questa settimana: {tss_w0:.0f} vs {tss_w1:.0f}. Settimana di scarico pianificata?"
+        })
+
+    # CTL in crescita rapida → rischio overtraining
+    if ctl_delta > 8:
+        alerts.append({
+            "type": "warning",
+            "icon": "📈",
+            "title": f"CTL cresciuto di {ctl_delta:.0f} punti in 14 giorni",
+            "msg": "Aumento rapido del carico. Regola empirica: non oltre +5-7 CTL/settimana per evitare infortuni."
+        })
+
+    return alerts
+
+
 # ============================================================
 # BOTTOM NAV BAR
 # ============================================================
@@ -1940,6 +2086,10 @@ if st.session_state.get("_df_cache_key") != _df_cache_key:
     # TSS vettorizzato (era apply() riga per riga)
     df["tss"] = calc_tss_vectorized(df, u)
 
+    # Fix: sci alpino su pista → dislivello zero (funivia conta come salita GPS)
+    # Fatto sul DataFrame così l'AI riceve dati corretti in tutti i contesti
+    df.loc[df["type"] == "AlpineSki", "total_elevation_gain"] = 0.0
+
     # Fitness (CTL/ATL/TSB)
     ctl_s, atl_s, tsb_s, ctl_daily, atl_daily, tsb_daily, tss_daily = compute_fitness(df)
     df["ctl"] = ctl_s.values
@@ -1949,8 +2099,8 @@ if st.session_state.get("_df_cache_key") != _df_cache_key:
     # Zone FC vettorizzate (erano 3 apply() separati)
     df["zone_num"], df["zone_color"], df["zone_label"] = assign_zones_vectorized(df, u["fc_max"])
 
-    # VO2max (ora vettorizzato)
-    vo2max_val = calc_vo2max_estimate(df)
+    # VO2max — usa sia dati corsa che bici, prende il massimo
+    vo2max_val = calc_vo2max_estimate(df, ftp=u.get("ftp", 200), peso=u.get("peso", 75))
 
     # Salva tutto in cache
     st.session_state["_df_cache_key"]   = _df_cache_key
@@ -2511,6 +2661,23 @@ if st.session_state.mob_menu == "dashboard":
         unsafe_allow_html=True
     )
 
+    # ── Alert proattivi ──
+    _alerts = get_proactive_alerts(df, current_ctl, current_atl, current_tsb, u)
+    _alert_colors = {
+        "success": ("#E8F5E9", "#2E7D32", "#4CAF50"),
+        "warning": ("#FFF3E0", "#E65100", "#FF9800"),
+        "info":    ("#E3F2FD", "#1565C0", "#2196F3"),
+    }
+    for _al in _alerts:
+        _bg, _tc, _bc = _alert_colors.get(_al["type"], _alert_colors["info"])
+        st.markdown(
+            f'<div style="background:{_bg};border-left:4px solid {_bc};border-radius:0 12px 12px 0;'
+            f'padding:10px 14px;margin:8px 12px 0">'
+            f'<div style="font-size:13px;font-weight:700;color:{_tc}">{_al["icon"]} {_al["title"]}</div>'
+            f'<div style="font-size:12px;color:{_tc};opacity:0.85;margin-top:3px">{_al["msg"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True)
+
     _w7_metrics = [
         ("⏱", f"{_w7_hrs:.1f}h", "ore attività"),
         ("📏", f"{_w7_km:.0f}", "km totali"),
@@ -2691,6 +2858,73 @@ elif st.session_state.mob_menu == "fitness":
     )
     st.plotly_chart(fig2, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Fitness per sport ──
+    _sport_fitness = compute_fitness_by_sport(df)
+    _sport_color   = {"run": "#FF4B4B", "bike": "#2196F3", "mountain": "#4FC3F7"}
+
+    st.markdown('<div class="mob-card"><div class="mob-card-title">🏅 CTL per Sport</div>',
+                unsafe_allow_html=True)
+    _sf_html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0">'
+    for _sk, _sv in _sport_fitness.items():
+        if _sv is None:
+            continue
+        _col = _sport_color[_sk]
+        _tsb_sign = "+" if _sv["tsb"] >= 0 else ""
+        _sf_html += (
+            f'<div style="background:#f8f9fa;border-radius:10px;padding:8px 6px;'
+            f'text-align:center;border-top:3px solid {_col}">'
+            f'<div style="font-size:18px">{_sv["icon"]}</div>'
+            f'<div style="font-size:11px;color:#888;font-weight:600">{_sv["label"]}</div>'
+            f'<div style="font-size:22px;font-weight:900;color:{_col};line-height:1.1">{_sv["ctl"]:.0f}</div>'
+            f'<div style="font-size:10px;color:#aaa">CTL</div>'
+            f'<div style="font-size:11px;color:#555;margin-top:3px">'
+            f'TSB <b style="color:{"#4CAF50" if _sv["tsb"]>=0 else "#F44336"}">'
+            f'{_tsb_sign}{_sv["tsb"]:.0f}</b></div>'
+            f'<div style="font-size:10px;color:#bbb">{_sv["n"]} uscite</div>'
+            f'</div>'
+        )
+    _sf_html += '</div>'
+    st.markdown(_sf_html, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── PMC per sport (tab) ──
+    _sport_tabs_avail = [(k, v) for k, v in _sport_fitness.items() if v is not None]
+    if _sport_tabs_avail:
+        st.markdown('<div class="mob-card"><div class="mob-card-title">📊 PMC per Sport — 60 giorni</div>',
+                    unsafe_allow_html=True)
+        _tab_labels = [f"{v['icon']} {v['label']}" for _, v in _sport_tabs_avail]
+        _tabs = st.tabs(_tab_labels)
+        for _ti, (_sk, _sv) in enumerate(_sport_tabs_avail):
+            with _tabs[_ti]:
+                _col = _sport_color[_sk]
+                _pmc_s = pd.DataFrame({
+                    "CTL": _sv["ctl_daily"],
+                    "ATL": _sv["atl_daily"],
+                    "TSB": _sv["tsb_daily"],
+                }).dropna().tail(60)
+                if not _pmc_s.empty:
+                    _fig_s = go.Figure()
+                    _fig_s.add_trace(go.Scatter(x=_pmc_s.index, y=_pmc_s["CTL"],
+                        name="CTL", line=dict(color=_col, width=2)))
+                    _fig_s.add_trace(go.Scatter(x=_pmc_s.index, y=_pmc_s["ATL"],
+                        name="ATL", line=dict(color="#F44336", width=2, dash="dot")))
+                    _fig_s.add_trace(go.Scatter(x=_pmc_s.index, y=_pmc_s["TSB"],
+                        name="TSB", line=dict(color="#aaa", width=1.5),
+                        fill="tozeroy", fillcolor="rgba(0,0,0,0.04)"))
+                    _fig_s.add_hline(y=0, line_dash="dot", line_color="#ddd", line_width=1)
+                    _fig_s.update_layout(
+                        height=200, margin=dict(l=0,r=0,t=4,b=0),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        legend=dict(orientation="h", y=-0.3, font_size=10),
+                        xaxis=dict(gridcolor="rgba(0,0,0,0.04)", tickfont_size=9),
+                        yaxis=dict(gridcolor="rgba(0,0,0,0.04)", tickfont_size=9),
+                    )
+                    st.plotly_chart(_fig_s, use_container_width=True)
+                else:
+                    st.markdown('<div style="color:#aaa;font-size:13px;padding:8px">Dati insufficienti</div>',
+                                unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # VO2max
     if vo2max_val:
@@ -3006,7 +3240,7 @@ elif st.session_state.mob_menu == "chat":
     /* Streamlit chat input fix — sempre visibile sopra la nav */
     div[data-testid="stChatInput"] {
         position: sticky !important;
-        bottom: 68px !important;
+        bottom: 88px !important;
         background: #f0f2f6 !important;
         padding: 8px 0 4px !important;
         z-index: 998 !important;
