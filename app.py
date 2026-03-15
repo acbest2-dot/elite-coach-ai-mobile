@@ -1578,6 +1578,15 @@ def render_bottom_nav():
 
     st.markdown("""
 <style>
+/* Nascondi icone Streamlit in basso a destra su mobile */
+[data-testid="stToolbar"],
+[data-testid="stToolbarActions"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+.stDeployButton,
+#MainMenu,
+footer { display: none !important; visibility: hidden !important; }
+
 [data-testid="stRadio"] {
     position: fixed !important;
     bottom: 0 !important; left: 0 !important; right: 0 !important;
