@@ -736,6 +736,205 @@ def normalize_intervals_activity(act: dict) -> dict:
     }
 
 
+@st.cache_data(ttl=3600)
+def fetch_intervals_athlete_profile(athlete_id: str, api_key: str):
+    """
+    Fetch profilo atleta da intervals.icu.
+    Contiene: zone FC per sport, zone potenza, eFTP, sweet spot, peso, FC riposo.
+    
+    Struttura zone restituite da intervals.icu:
+    {
+      "zones": [
+        {"sport": "Ride", "type": "Power", "zones": [{"id":1,"min":0,"max":150}, ...]},
+        {"sport": "Run",  "type": "Pace",  "zones": [...]},
+        {"sport": null,   "type": "HR",    "zones": [{"id":1,"min":0,"max":120}, ...]}
+      ],
+      "ftp": 280,
+      "weight": 72.5,
+      "restingHR": 42
+    }
+    """
+    if not api_key or not athlete_id:
+        return None
+    try:
+        import base64 as _b64
+        token = _b64.b64encode(f"API_KEY:{api_key}".encode()).decode()
+        url   = f"https://intervals.icu/api/v1/athlete/{athlete_id}"
+        resp  = requests.get(url, headers={"Authorization": f"Basic {token}"}, timeout=8)
+        if resp.status_code == 200:
+            return resp.json()
+        st.session_state["_icu_profile_error"] = f"HTTP {resp.status_code}: {resp.text[:120]}"
+        return None
+    except Exception as e:
+        st.session_state["_icu_profile_error"] = str(e)
+        return None
+
+
+@st.cache_data(ttl=3600)
+def fetch_intervals_powercurve(athlete_id: str, api_key: str,
+                                oldest: str = None, newest: str = None,
+                                sport_type: str = "Ride"):
+    """
+    Curva di potenza da intervals.icu.
+    Ritorna lista di {secs, watts, watts_per_kg, date}.
+    Se oldest/newest non specificati → usa la stagione corrente.
+    """
+    if not api_key or not athlete_id:
+        return []
+    try:
+        import base64 as _b64
+        token  = _b64.b64encode(f"API_KEY:{api_key}".encode()).decode()
+        url    = f"https://intervals.icu/api/v1/athlete/{athlete_id}/power-curve"
+        params = {"type": sport_type}
+        if oldest:
+            params["oldest"] = oldest
+        if newest:
+            params["newest"] = newest
+        resp = requests.get(url, headers={"Authorization": f"Basic {token}"},
+                            params=params, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        return []
+    except Exception:
+        return []
+
+
+def get_icu_zones_for_sport(profile: dict, sport_type: str):
+    """
+    Estrae zone FC e potenza per uno sport specifico dal profilo intervals.icu.
+    
+    Ritorna:
+    {
+      "power_zones": [{"id":1,"min":0,"max":150,"name":"Z1 Recupero"}, ...] oppure []
+      "hr_zones":    [{"id":1,"min":0,"max":120,"name":"Z1"}, ...]
+      "ftp":         280,
+      "lthr":        165
+    }
+    """
+    if not profile:
+        return {"power_zones": [], "hr_zones": [], "ftp": None, "lthr": None}
+
+    zones_list = profile.get("zones") or []
+    
+    # Mappa sport intervals.icu → sport Strava
+    _sport_map = {
+        "Run":              ["Run", "TrailRun"],
+        "Ride":             ["Ride", "VirtualRide", "MountainBikeRide"],
+        "Swim":             ["Swim"],
+        "NordicSki":        ["BackcountrySki", "NordicSki"],
+    }
+    # Trova il tipo sport intervals.icu corrispondente
+    _icu_sport = None
+    for icu_s, strava_types in _sport_map.items():
+        if sport_type in strava_types:
+            _icu_sport = icu_s
+            break
+
+    power_zones = []
+    hr_zones    = []
+    ftp  = profile.get("ftp")
+    lthr = None
+
+    for zgroup in zones_list:
+        ztype  = zgroup.get("type", "")
+        zsport = zgroup.get("sport")  # None = globale (HR)
+        zlist  = zgroup.get("zones") or []
+
+        if ztype == "Power" and zsport == _icu_sport:
+            power_zones = [
+                {
+                    "id":   z.get("id", i+1),
+                    "min":  z.get("min", 0),
+                    "max":  z.get("max", 9999),
+                    "name": z.get("name") or f"Z{z.get('id', i+1)}",
+                }
+                for i, z in enumerate(zlist)
+            ]
+        elif ztype == "HR" and zsport is None:
+            hr_zones = [
+                {
+                    "id":   z.get("id", i+1),
+                    "min":  z.get("min", 0),
+                    "max":  z.get("max", 9999),
+                    "name": z.get("name") or f"Z{z.get('id', i+1)}",
+                }
+                for i, z in enumerate(zlist)
+            ]
+            # LTHR = soglia HR (spesso z4/z5 boundary)
+            if len(hr_zones) >= 4:
+                lthr = hr_zones[3].get("min")
+
+    return {
+        "power_zones": power_zones,
+        "hr_zones":    hr_zones,
+        "ftp":         ftp,
+        "lthr":        lthr,
+    }
+
+
+# Colori standard per zone (1-7)
+_ZONE_COLORS = {
+    1: ("#4CAF50", "#E8F5E9"),   # verde — recupero
+    2: ("#8BC34A", "#F1F8E9"),   # verde chiaro — endurance
+    3: ("#FFC107", "#FFFDE7"),   # giallo — tempo
+    4: ("#FF9800", "#FFF3E0"),   # arancione — soglia
+    5: ("#F44336", "#FFEBEE"),   # rosso — VO2max
+    6: ("#9C27B0", "#F3E5F5"),   # viola — anaerobico
+    7: ("#212121", "#FAFAFA"),   # nero — neuromuscolare
+}
+
+def zone_color_from_id(zone_id: int):
+    """Ritorna (colore_testo, colore_bg) per una zona numerata."""
+    return _ZONE_COLORS.get(zone_id, ("#9E9E9E", "#F5F5F5"))
+
+
+def get_zone_for_activity_icu(row, icu_zones: dict):
+    """
+    Determina zona dominante per un'attività usando le zone reali intervals.icu.
+    Usa potenza se disponibile (bici), altrimenti FC.
+    Ritorna (zone_id, zone_color, zone_label).
+    """
+    a_type = row.get("type", "")
+    is_bike = a_type in ("Ride", "VirtualRide", "MountainBikeRide")
+
+    # Prima prova con icu_power_zone (già calcolata da intervals.icu)
+    icu_pz = row.get("icu_power_zone")
+    if icu_pz and is_bike:
+        try:
+            zid = int(str(icu_pz).replace("Z","").strip())
+            col, _ = zone_color_from_id(zid)
+            return zid, col, f"Z{zid}"
+        except Exception:
+            pass
+
+    # Calcola da potenza media se abbiamo zone
+    watts = row.get("average_watts")
+    if is_bike and pd.notna(watts) and watts and icu_zones.get("power_zones"):
+        watts = float(watts)
+        for z in icu_zones["power_zones"]:
+            if z["min"] <= watts <= z["max"]:
+                zid = z["id"]
+                col, _ = zone_color_from_id(zid)
+                return zid, col, f"Z{zid} {z['name']}"
+
+    # Calcola da FC media
+    hr = row.get("average_heartrate")
+    if pd.notna(hr) and hr and icu_zones.get("hr_zones"):
+        hr = float(hr)
+        for z in icu_zones["hr_zones"]:
+            if z["min"] <= hr <= z["max"]:
+                zid = z["id"]
+                col, _ = zone_color_from_id(zid)
+                return zid, col, f"Z{zid} {z['name']}"
+
+    # Fallback al vecchio metodo con fc_max
+    hr_val = row.get("average_heartrate")
+    fc_max = 190  # default
+    if pd.notna(hr_val) and fc_max > 0:
+        return get_hr_zone(float(hr_val) / fc_max)
+    return 0, "#9E9E9E", "N/A"
+
+
 def get_intervals_fitness(athlete_id: str, api_key: str):
     """
     Entry point principale. Ritorna dict con ctl, atl, tsb, ramp_rate, history (30gg).
@@ -2550,6 +2749,29 @@ if INTERVALS_API_KEY:
     else:
         _icu_fitness = st.session_state.get("_icu_fitness_data")
 
+# ── Profilo atleta intervals.icu (zone reali, FTP, LTHR) ──
+_icu_profile = None
+if INTERVALS_API_KEY:
+    if "_icu_profile" not in st.session_state:
+        _icu_profile = fetch_intervals_athlete_profile(INTERVALS_ATHLETE_ID, INTERVALS_API_KEY)
+        st.session_state["_icu_profile"] = _icu_profile
+    else:
+        _icu_profile = st.session_state["_icu_profile"]
+
+# Zone per i 3 sport principali — precompilate per velocità
+_icu_zones_bike = get_icu_zones_for_sport(_icu_profile, "Ride")    if _icu_profile else {"power_zones":[],"hr_zones":[],"ftp":None,"lthr":None}
+_icu_zones_run  = get_icu_zones_for_sport(_icu_profile, "Run")     if _icu_profile else {"power_zones":[],"hr_zones":[],"ftp":None,"lthr":None}
+_icu_zones_ski  = get_icu_zones_for_sport(_icu_profile, "BackcountrySki") if _icu_profile else {"power_zones":[],"hr_zones":[],"ftp":None,"lthr":None}
+
+def _get_icu_zones_for_row(row):
+    """Restituisce le zone intervals.icu giuste per il tipo di sport dell'attività."""
+    t = row.get("type","")
+    if t in ("Ride","VirtualRide","MountainBikeRide"): return _icu_zones_bike
+    if t in ("Run","TrailRun"):                        return _icu_zones_run
+    if t in ("BackcountrySki","AlpineSki","NordicSki"):return _icu_zones_ski
+    # Fallback: usa zone FC globali
+    return {"power_zones":[],"hr_zones":_icu_zones_bike.get("hr_zones",[]),"ftp":None,"lthr":None}
+
 if _icu_fitness:
     current_ctl      = _icu_fitness["ctl"]
     current_atl      = _icu_fitness["atl"]
@@ -2637,7 +2859,7 @@ if st.session_state.selected_act_id is not None:
         row  = _srow_df.iloc[0]
         s    = get_sport_info(row["type"], row.get("name",""))
         m    = format_metrics(row)
-        z_n, z_c, z_l = get_zone_for_activity(row, u["fc_max"])
+        z_n, z_c, z_l = get_zone_for_activity_icu(row, _get_icu_zones_for_row(row))
 
         # Back button
         st.markdown('<div class="sec-pad">', unsafe_allow_html=True)
@@ -2707,6 +2929,92 @@ if st.session_state.selected_act_id is not None:
             )
         _stats_html += '</div></div>'
         st.markdown(_stats_html, unsafe_allow_html=True)
+
+        # ── Zone reali intervals.icu ──
+        _act_zones   = _get_icu_zones_for_row(row)
+        _act_type    = row.get("type","")
+        _is_bike_act = _act_type in ("Ride","VirtualRide","MountainBikeRide")
+        _pzones      = _act_zones.get("power_zones", [])
+        _hzones      = _act_zones.get("hr_zones", [])
+        _act_ftp     = float(row.get("icu_ftp") or _act_zones.get("ftp") or u.get("ftp",200) or 200)
+        _act_watts   = row.get("average_watts")
+        _act_np      = row.get("icu_weighted_avg_watts")
+        _act_if      = row.get("icu_intensity") or (float(_act_np)/_act_ftp if _act_np and _act_ftp else None)
+        _act_hr      = row.get("average_heartrate")
+
+        _has_power_data = _is_bike_act and pd.notna(_act_watts) and _act_watts and _pzones
+        _has_hr_data    = pd.notna(_act_hr) and _act_hr and _hzones
+
+        if _has_power_data or _has_hr_data:
+            _zones_html = '<div class="mob-card"><div class="mob-card-title">🎯 Zone intervals.icu</div>'
+
+            # Riga metriche potenza NP/IF
+            if _is_bike_act and _act_np:
+                _np_disp = f"{float(_act_np):.0f} W"
+                _if_disp = f"{_act_if:.2f}" if _act_if else "—"
+                _zones_html += (
+                    f'<div style="display:flex;gap:8px;margin-bottom:10px">'
+                    f'<div style="flex:1;background:#EFF6FF;border-radius:10px;padding:8px;text-align:center">'
+                    f'<div style="font-size:10px;color:#1D4ED8;font-weight:700">NP (Normalized Power)</div>'
+                    f'<div style="font-size:22px;font-weight:900;color:#1D4ED8">{_np_disp}</div></div>'
+                    f'<div style="flex:1;background:#FFF7ED;border-radius:10px;padding:8px;text-align:center">'
+                    f'<div style="font-size:10px;color:#C2410C;font-weight:700">IF (Intensity Factor)</div>'
+                    f'<div style="font-size:22px;font-weight:900;color:#C2410C">{_if_disp}</div></div>'
+                    f'</div>'
+                )
+
+            # Barre zone potenza
+            if _has_power_data:
+                _zones_html += '<div style="font-size:10px;color:#94A3B8;font-weight:700;margin-bottom:6px">ZONE DI POTENZA (% FTP)</div>'
+                for _z in _pzones:
+                    _zid   = _z["id"]
+                    _zmin  = _z["min"]
+                    _zmax  = _z["max"] if _z["max"] < 9000 else None
+                    _zcol, _zbg = zone_color_from_id(_zid)
+                    _zname = _z.get("name", f"Z{_zid}")
+                    # Watt assoluti dal FTP
+                    _wmin = int(_zmin * _act_ftp / 100) if _act_ftp else _zmin
+                    _wmax = int(_zmax * _act_ftp / 100) if _zmax and _act_ftp else None
+                    _wlabel = f"{_wmin}–{_wmax}W" if _wmax else f">{_wmin}W"
+                    # Evidenzia la zona attuale
+                    _ap = float(_act_watts)
+                    _pct_ftp = _ap / _act_ftp * 100 if _act_ftp else 0
+                    _is_current = (_zmin <= _pct_ftp <= (_zmax or 9999))
+                    _border = f"border:2px solid {_zcol}" if _is_current else "border:1px solid transparent"
+                    _zones_html += (
+                        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;'
+                        f'background:{_zbg if _is_current else "#FAFAFA"};border-radius:8px;padding:5px 8px;{_border}">'
+                        f'<div style="width:12px;height:12px;border-radius:3px;background:{_zcol};flex-shrink:0"></div>'
+                        f'<div style="flex:1;font-size:12px;font-weight:{"800" if _is_current else "600"};color:{"#111" if _is_current else "#555"}">{_zname}</div>'
+                        f'<div style="font-size:11px;color:#94A3B8">{_wlabel}</div>'
+                        f'{"<div style=\"font-size:10px;font-weight:700;color:" + _zcol + "\">◀ attuale</div>" if _is_current else ""}'
+                        f'</div>'
+                    )
+
+            # Barre zone FC
+            if _has_hr_data:
+                _zones_html += '<div style="font-size:10px;color:#94A3B8;font-weight:700;margin:10px 0 6px">ZONE DI FREQUENZA CARDIACA</div>'
+                for _z in _hzones:
+                    _zid   = _z["id"]
+                    _zmin  = _z["min"]
+                    _zmax  = _z["max"] if _z["max"] < 9000 else None
+                    _zcol, _zbg = zone_color_from_id(_zid)
+                    _zname = _z.get("name", f"Z{_zid}")
+                    _hlabel = f"{_zmin}–{_zmax} bpm" if _zmax else f">{_zmin} bpm"
+                    _is_current_hr = (_zmin <= float(_act_hr) <= (_zmax or 9999))
+                    _border_hr = f"border:2px solid {_zcol}" if _is_current_hr else "border:1px solid transparent"
+                    _zones_html += (
+                        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;'
+                        f'background:{_zbg if _is_current_hr else "#FAFAFA"};border-radius:8px;padding:5px 8px;{_border_hr}">'
+                        f'<div style="width:12px;height:12px;border-radius:3px;background:{_zcol};flex-shrink:0"></div>'
+                        f'<div style="flex:1;font-size:12px;font-weight:{"800" if _is_current_hr else "600"};color:{"#111" if _is_current_hr else "#555"}">{_zname}</div>'
+                        f'<div style="font-size:11px;color:#94A3B8">{_hlabel}</div>'
+                        f'{"<div style=\"font-size:10px;font-weight:700;color:" + _zcol + "\">◀ attuale</div>" if _is_current_hr else ""}'
+                        f'</div>'
+                    )
+
+            _zones_html += '</div>'
+            st.markdown(_zones_html, unsafe_allow_html=True)
 
         # ============================================================
         # MAPPA 2D / 3D — CON FETCH ON-DEMAND DA STRAVA
@@ -3355,7 +3663,7 @@ if st.session_state.mob_menu == "dashboard":
         _s5  = get_sport_info(_row5["type"], _row5.get("name",""))
         _m5  = format_metrics(_row5)
         _id5 = _row5.get("id", _row5.name)
-        _zn5, _zc5, _zl5 = get_zone_for_activity(_row5, u["fc_max"])
+        _zn5, _zc5, _zl5 = get_zone_for_activity_icu(_row5, _get_icu_zones_for_row(_row5))
         _hdr = "⏱ Ultima Attività" if _i5 == 0 else ""
         render_act_card(_row5, _m5, _s5, _zc5, _zl5, _id5, header_label=_hdr,
                         key_prefix="dash5")
@@ -3540,6 +3848,156 @@ elif st.session_state.mob_menu == "fitness":
                 else:
                     st.markdown('<div style="color:#aaa;font-size:13px;padding:8px">Dati insufficienti</div>',
                                 unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Curva di Potenza intervals.icu ──
+    if INTERVALS_API_KEY and INTERVALS_ATHLETE_ID:
+        st.markdown('<div class="mob-card"><div class="mob-card-title">⚡ Curva di Potenza — Stagione</div>',
+                    unsafe_allow_html=True)
+
+        _pc_cache_key = f"_pc_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        if st.session_state.get("_pc_key") != _pc_cache_key:
+            _pc_raw = fetch_intervals_powercurve(INTERVALS_ATHLETE_ID, INTERVALS_API_KEY, sport_type="Ride")
+            _pc_raw_prev = fetch_intervals_powercurve(
+                INTERVALS_ATHLETE_ID, INTERVALS_API_KEY,
+                oldest=f"{datetime.now(timezone.utc).year - 1}-01-01",
+                newest=f"{datetime.now(timezone.utc).year - 1}-12-31",
+                sport_type="Ride"
+            )
+            st.session_state["_pc_key"]      = _pc_cache_key
+            st.session_state["_pc_data"]     = _pc_raw
+            st.session_state["_pc_data_prev"] = _pc_raw_prev
+        else:
+            _pc_raw      = st.session_state.get("_pc_data", [])
+            _pc_raw_prev = st.session_state.get("_pc_data_prev", [])
+
+        if _pc_raw:
+            # Durate significative da mostrare (secondi → etichetta)
+            _pc_targets = [
+                (1,    "1s"),   (5,   "5s"),   (10,  "10s"),  (30,  "30s"),
+                (60,   "1m"),   (120, "2m"),   (300, "5m"),   (600, "10m"),
+                (1200, "20m"),  (2400,"40m"),  (3600,"1h"),   (7200,"2h"),
+            ]
+            _peso = float(u.get("peso", 75))
+            _ftp  = float(_icu_zones_bike.get("ftp") or u.get("ftp", 200))
+
+            # Indicizza per secondi
+            _pc_by_secs      = {r["secs"]: r for r in _pc_raw      if isinstance(r, dict) and r.get("watts")}
+            _pc_by_secs_prev = {r["secs"]: r for r in _pc_raw_prev if isinstance(r, dict) and r.get("watts")}
+
+            # Costruisci record per tabella
+            _records = []
+            for secs, label in _pc_targets:
+                # Trova il punto più vicino disponibile
+                _best = None
+                for s in (secs, secs-1, secs+1, secs-2, secs+2):
+                    if s in _pc_by_secs:
+                        _best = _pc_by_secs[s]
+                        break
+                if not _best:
+                    continue
+                _w   = float(_best.get("watts", 0))
+                _wkg = round(_w / _peso, 2) if _peso > 0 else 0
+                # Anno scorso
+                _best_p = None
+                for s in (secs, secs-1, secs+1, secs-2, secs+2):
+                    if s in _pc_by_secs_prev:
+                        _best_p = _pc_by_secs_prev[s]
+                        break
+                _w_prev = float(_best_p.get("watts", 0)) if _best_p else 0
+                _delta_pct = ((_w - _w_prev) / _w_prev * 100) if _w_prev > 0 else None
+                # IF rispetto a FTP
+                _if_val = _w / _ftp if _ftp > 0 else 0
+                # Zona colore basata su % FTP
+                if   _if_val >= 1.20: _zid = 6
+                elif _if_val >= 1.05: _zid = 5
+                elif _if_val >= 0.90: _zid = 4
+                elif _if_val >= 0.75: _zid = 3
+                elif _if_val >= 0.55: _zid = 2
+                else:                 _zid = 1
+                _zcol, _zbg = zone_color_from_id(_zid)
+                _records.append({
+                    "label": label, "watts": _w, "wkg": _wkg,
+                    "color": _zcol, "bg": _zbg,
+                    "delta": _delta_pct, "if": _if_val
+                })
+
+            # Grafico sparkline potenza (log scale x)
+            _pc_all_secs  = sorted([r["secs"] for r in _pc_raw if isinstance(r,dict) and r.get("watts") and r["secs"] <= 7200])
+            _pc_all_watts = [_pc_by_secs[s]["watts"] for s in _pc_all_secs if s in _pc_by_secs]
+            _pc_all_secs_prev  = sorted([r["secs"] for r in _pc_raw_prev if isinstance(r,dict) and r.get("watts") and r["secs"] <= 7200])
+            _pc_all_watts_prev = [_pc_by_secs_prev[s]["watts"] for s in _pc_all_secs_prev if s in _pc_by_secs_prev]
+
+            if _pc_all_secs and _pc_all_watts:
+                _fig_pc = go.Figure()
+                if _pc_all_secs_prev and _pc_all_watts_prev:
+                    _fig_pc.add_trace(go.Scatter(
+                        x=_pc_all_secs_prev, y=_pc_all_watts_prev,
+                        name=f"{datetime.now(timezone.utc).year - 1}",
+                        line=dict(color="#CBD5E1", width=1.5, dash="dot"),
+                    ))
+                _fig_pc.add_trace(go.Scatter(
+                    x=_pc_all_secs, y=_pc_all_watts,
+                    name=f"{datetime.now(timezone.utc).year}",
+                    line=dict(color="#1A56DB", width=2.5),
+                    fill="tozeroy", fillcolor="rgba(26,86,219,0.07)",
+                ))
+                # Linea FTP
+                _fig_pc.add_hline(y=_ftp, line_dash="dash", line_color="#F97316",
+                                  line_width=1.5, annotation_text=f"FTP {_ftp:.0f}W",
+                                  annotation_font_size=10, annotation_font_color="#F97316")
+                _fig_pc.update_layout(
+                    height=200, margin=dict(l=0, r=0, t=8, b=0),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(
+                        type="log",
+                        tickvals=[5, 30, 60, 300, 600, 1800, 3600, 7200],
+                        ticktext=["5s","30s","1m","5m","10m","30m","1h","2h"],
+                        gridcolor="rgba(0,0,0,0.05)", tickfont_size=9,
+                    ),
+                    yaxis=dict(
+                        title="Watt", gridcolor="rgba(0,0,0,0.05)", tickfont_size=9
+                    ),
+                    legend=dict(orientation="h", y=1.15, font_size=10),
+                    showlegend=True,
+                )
+                st.plotly_chart(_fig_pc, use_container_width=True)
+
+            # Griglia record: 4 colonne
+            st.markdown('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px">', unsafe_allow_html=True)
+            for _rec in _records:
+                _d_html = ""
+                if _rec["delta"] is not None:
+                    _darr = "↑" if _rec["delta"] >= 0 else "↓"
+                    _dcol = "#16A34A" if _rec["delta"] >= 0 else "#DC2626"
+                    _d_html = (f'<div style="font-size:9px;color:{_dcol};font-weight:700;margin-top:1px">'
+                               f'{_darr}{abs(_rec["delta"]):.0f}%</div>')
+                st.markdown(
+                    f'<div style="background:{_rec["bg"]};border-radius:10px;padding:8px 6px;text-align:center">'
+                    f'<div style="font-size:10px;color:{_rec["color"]};font-weight:700;margin-bottom:2px">{_rec["label"]}</div>'
+                    f'<div style="font-size:18px;font-weight:900;color:{_rec["color"]};line-height:1">{_rec["watts"]:.0f}</div>'
+                    f'<div style="font-size:9px;color:#94A3B8;margin-top:1px">{_rec["wkg"]:.2f} W/kg</div>'
+                    f'{_d_html}'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            # FTP e W/kg summary
+            _ftp_wkg = round(_ftp / _peso, 2) if _peso > 0 else 0
+            st.markdown(
+                f'<div style="margin-top:10px;padding:10px 12px;background:#EFF6FF;border-radius:10px;'
+                f'display:flex;justify-content:space-between;align-items:center">'
+                f'<div><span style="font-size:11px;color:#1D4ED8;font-weight:700">FTP attuale</span>'
+                f'<div style="font-size:22px;font-weight:900;color:#1D4ED8">{_ftp:.0f} W</div></div>'
+                f'<div style="text-align:right"><span style="font-size:11px;color:#6366F1;font-weight:700">W/kg</span>'
+                f'<div style="font-size:22px;font-weight:900;color:#6366F1">{_ftp_wkg:.2f}</div></div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown('<div style="font-size:12px;color:#94A3B8;padding:8px">Nessun dato di potenza disponibile per la stagione corrente.</div>', unsafe_allow_html=True)
+
         st.markdown("</div>", unsafe_allow_html=True)
 
     # VO2max
@@ -3727,7 +4185,7 @@ elif st.session_state.mob_menu == "storico":
         for _, row in df_show.iterrows():
             s   = get_sport_info(row["type"], row.get("name",""))
             m   = format_metrics(row)
-            z_n, z_c, z_l = get_zone_for_activity(row, u["fc_max"])
+            z_n, z_c, z_l = get_zone_for_activity_icu(row, _get_icu_zones_for_row(row))
             _act_id = row.get("id", row.name)
             render_act_card(row, m, s, z_c, z_l, _act_id, key_prefix="list")
 
@@ -3847,7 +4305,7 @@ elif st.session_state.mob_menu == "storico":
                 s_   = get_sport_info(row["type"], row.get("name",""))
                 m_   = format_metrics(row)
                 _id  = row.get("id", row.name)
-                _zn, _zc, _zl = get_zone_for_activity(row, u["fc_max"])
+                _zn, _zc, _zl = get_zone_for_activity_icu(row, _get_icu_zones_for_row(row))
                 render_act_card(row, m_, s_, _zc, _zl, _id, key_prefix="cal")
 
 # ============================================================
