@@ -73,7 +73,9 @@ GEMINI_KEY    = get_secret("GOOGLE_API_KEY")
 GROK_KEY      = get_secret("GROK_API_KEY") or get_secret("XAI_API_KEY") or ""
 MAPBOX_TOKEN  = get_secret("MAPBOX_TOKEN") or ""
 GSHEET_ID     = get_secret("GSHEET_ID") or ""
-GSHEET_CREDS  = get_secret("GSHEET_CREDENTIALS") or ""
+GSHEET_CREDS     = get_secret("GSHEET_CREDENTIALS") or ""
+INTERVALS_API_KEY    = get_secret("INTERVALS_API_KEY") or ""
+INTERVALS_ATHLETE_ID = get_secret("INTERVALS_ATHLETE_ID") or "0"
 
 # ── AI Provider ──
 _ai_client     = None
@@ -145,7 +147,7 @@ st.markdown("""
   }
   [data-testid="collapsedControl"] { display: none !important; }
   section[data-testid="stSidebar"]  { display: none !important; }
-  .block-container { padding: 0 0 130px 0 !important; max-width: 100% !important; }
+  .block-container { padding: 0 0 220px 0 !important; max-width: 100% !important; }
 
   /* ── FADE-IN — NON su stVerticalBlock (rompe position:fixed della nav) ── */
   /* Applicato solo al mob-header che è il primo elemento visibile */
@@ -593,6 +595,90 @@ def calc_vo2max_estimate(df_sorted, ftp=200, peso=75):
     return round(best, 1) if best > 0 else None
 
 # ============================================================
+# ============================================================
+# INTERVALS.ICU — Fetch CTL/ATL/TSB reali
+# ============================================================
+@st.cache_data(ttl=900)
+def fetch_intervals_wellness(athlete_id: str, api_key: str, date_str: str):
+    """Wellness intervals.icu per una data: ctl, atl, tsb, rampRate, weight, hrv..."""
+    if not api_key:
+        return None
+    try:
+        import base64 as _b64
+        token = _b64.b64encode(f"API_KEY:{api_key}".encode()).decode()
+        url   = f"https://intervals.icu/api/v1/athlete/{athlete_id}/wellness/{date_str}"
+        resp  = requests.get(url, headers={"Authorization": f"Basic {token}"}, timeout=8)
+        return resp.json() if resp.status_code == 200 else None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=900)
+def fetch_intervals_wellness_range(athlete_id: str, api_key: str, oldest: str, newest: str):
+    """Lista wellness per range di date — usata per sparkline storici."""
+    if not api_key:
+        return []
+    try:
+        import base64 as _b64
+        token = _b64.b64encode(f"API_KEY:{api_key}".encode()).decode()
+        url   = f"https://intervals.icu/api/v1/athlete/{athlete_id}/wellness"
+        resp  = requests.get(url, headers={"Authorization": f"Basic {token}"},
+                             params={"oldest": oldest, "newest": newest}, timeout=10)
+        return resp.json() if resp.status_code == 200 else []
+    except Exception:
+        return []
+
+
+def get_intervals_fitness(athlete_id: str, api_key: str):
+    """
+    Entry point principale. Ritorna dict con ctl, atl, tsb, ramp_rate, history (30gg).
+    history: lista di dict {date, ctl, atl, tsb} per sparkline.
+    Ritorna None se intervals.icu non è configurato o irraggiungibile.
+    """
+    if not api_key:
+        return None
+    today = datetime.now(timezone.utc).date()
+    # Prova oggi, poi ieri (il dato di oggi può non essere ancora disponibile di mattina)
+    for delta in (0, 1):
+        d = (today - timedelta(days=delta)).strftime("%Y-%m-%d")
+        w = fetch_intervals_wellness(athlete_id, api_key, d)
+        if w and (w.get("ctl") is not None or w.get("fitnessScore") is not None):
+            break
+    else:
+        return None
+
+    ctl = w.get("ctl") or w.get("fitnessScore")
+    atl = w.get("atl") or w.get("fatigueScore")
+    tsb = w.get("form") or ((ctl - atl) if (ctl and atl) else None)
+    ramp = w.get("rampRate")
+
+    # Storico 30 giorni per sparkline
+    oldest_str = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    today_str  = today.strftime("%Y-%m-%d")
+    raw_history = fetch_intervals_wellness_range(athlete_id, api_key, oldest_str, today_str)
+    history = []
+    for rec in raw_history:
+        c = rec.get("ctl") or rec.get("fitnessScore")
+        a = rec.get("atl") or rec.get("fatigueScore")
+        t = rec.get("form") or ((c - a) if (c and a) else None)
+        if c is not None:
+            history.append({
+                "date": rec.get("id", ""),
+                "ctl":  float(c),
+                "atl":  float(a) if a else 0.0,
+                "tsb":  float(t) if t else 0.0,
+            })
+    return {
+        "ctl":        float(ctl),
+        "atl":        float(atl) if atl else 0.0,
+        "tsb":        float(tsb) if tsb else 0.0,
+        "ramp_rate":  float(ramp) if ramp else None,
+        "wellness":   w,
+        "history":    history,
+        "source":     "intervals.icu",
+    }
+
+
 # GOOGLE SHEETS — Cache persistente
 # ============================================================
 def _get_gsheet_client():
@@ -1849,7 +1935,7 @@ def render_bottom_nav():
     height: 50px !important; background: #ffffff !important;
     z-index: 99998 !important;
 }
-.block-container { padding-bottom: 130px !important; }
+.block-container { padding-bottom: 220px !important; }
 </style>
 <div class="nav-cover-strip"></div>
 """, unsafe_allow_html=True)
@@ -2275,9 +2361,41 @@ if _gsheet_ok and st.session_state.get("weekly_plan") is None:
         st.session_state.weekly_plan      = _saved_plan
         st.session_state.weekly_plan_date = _saved_plan_dt
 
-current_ctl = float(df["ctl"].iloc[-1])
-current_atl = float(df["atl"].iloc[-1])
-current_tsb = float(df["tsb"].iloc[-1])
+# ── CTL/ATL/TSB: intervals.icu (preciso) con fallback al calcolo locale ──
+_icu_fitness = None
+if INTERVALS_API_KEY:
+    _icu_cache_key = f"_icu_fit_{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}"
+    if st.session_state.get("_icu_fitness_key") != _icu_cache_key:
+        with st.spinner("🔄 Aggiorno fitness da intervals.icu..."):
+            _icu_fitness = get_intervals_fitness(INTERVALS_ATHLETE_ID, INTERVALS_API_KEY)
+        st.session_state["_icu_fitness_key"]  = _icu_cache_key
+        st.session_state["_icu_fitness_data"] = _icu_fitness
+    else:
+        _icu_fitness = st.session_state.get("_icu_fitness_data")
+
+if _icu_fitness:
+    current_ctl      = _icu_fitness["ctl"]
+    current_atl      = _icu_fitness["atl"]
+    current_tsb      = _icu_fitness["tsb"]
+    _fitness_source  = "intervals.icu"
+    _fitness_color   = "#10B981"
+    # Aggiorna df per compatibilità con funzioni AI/chat
+    df["ctl"] = current_ctl
+    df["atl"] = current_atl
+    df["tsb"] = current_tsb
+    # Sparkline reali da intervals.icu
+    _icu_hist = _icu_fitness.get("history", [])
+    if len(_icu_hist) >= 2:
+        _icu_idx  = pd.to_datetime([r["date"] for r in _icu_hist])
+        ctl_daily = pd.Series([r["ctl"]  for r in _icu_hist], index=_icu_idx)
+        atl_daily = pd.Series([r["atl"]  for r in _icu_hist], index=_icu_idx)
+        tsb_daily = pd.Series([r["tsb"]  for r in _icu_hist], index=_icu_idx)
+else:
+    current_ctl      = float(df["ctl"].iloc[-1])
+    current_atl      = float(df["atl"].iloc[-1])
+    current_tsb      = float(df["tsb"].iloc[-1])
+    _fitness_source  = "stimato"
+    _fitness_color   = "#F97316"
 
 if current_tsb > 10:   status_color, status_label = "#4CAF50", "🟢 In Forma"
 elif current_tsb > -5: status_color, status_label = "#FF9800", "🟡 Stabile"
@@ -2769,6 +2887,55 @@ if st.session_state.mob_menu == "dashboard":
         _w7_sports    = _w7["type"].value_counts()
         _sport_icons  = " ".join([SPORT_INFO.get(t, {"icon":"🏅"})["icon"] for t in _w7_sports.index[:3]])
 
+        # ── Settimana precedente (7-14gg fa) per delta A ──
+        _ref_date = df["start_date"].max()
+        _pw7 = df[
+            (df["start_date"] >= _ref_date - pd.Timedelta(days=14)) &
+            (df["start_date"] <  _ref_date - pd.Timedelta(days=7))
+        ]
+        _pw7_hrs  = _pw7["moving_time"].sum() / 3600
+        _pw7_km   = _pw7["distance"].sum() / 1000
+        _pw7_elev = _pw7["total_elevation_gain"].sum()
+        _pw7_tss  = _pw7["tss"].sum()
+        _pw7_n    = len(_pw7)
+        _cal_col_p = _pw7["calories"].fillna(0)
+        _kj_col_p  = _pw7["kilojoules"].fillna(0) * 0.239
+        _fc_est_p  = (_pw7["moving_time"] / 60 * (
+            0.014 * _pw7["average_heartrate"].fillna(0) - 0.05
+        ) * float(u.get("peso",75)) / 60 * 4.184).fillna(0)
+        _pw7_kcal = float(
+            np.where(_cal_col_p > 0, _cal_col_p,
+            np.where(_kj_col_p  > 0, _kj_col_p, _fc_est_p))
+        .sum())
+
+        def _delta_pct(cur, prev):
+            if prev == 0:
+                return None
+            return (cur - prev) / prev * 100
+
+        _w7_deltas = [
+            _delta_pct(_w7_hrs,  _pw7_hrs),
+            _delta_pct(_w7_km,   _pw7_km),
+            _delta_pct(_w7_elev, _pw7_elev),
+            _delta_pct(_w7_kcal, _pw7_kcal),
+            _delta_pct(_w7_tss,  _pw7_tss),
+            _delta_pct(_w7_n,    _pw7_n),
+        ]
+
+        # ── Pallini giornalieri (D) — ultimi 7 giorni ──
+        _today_date = datetime.now(timezone.utc).date()
+        _daily_dots = []
+        for _d in range(6, -1, -1):
+            _day = _today_date - timedelta(days=_d)
+            _day_mask = _w7["start_date"].dt.date == _day if len(_w7) > 0 else pd.Series([], dtype=bool)
+            _day_acts = _w7[_day_mask] if len(_w7) > 0 else pd.DataFrame()
+            if len(_day_acts) == 0:
+                _daily_dots.append({"color": None, "icon": None, "label": _day.strftime("%a")[0].upper()})
+            else:
+                _top_type = _day_acts["type"].iloc[0]
+                _sport    = SPORT_INFO.get(_top_type, {"icon": "🏅", "color": "#9E9E9E"})
+                _daily_dots.append({"color": _sport["color"], "icon": _sport["icon"], "label": _day.strftime("%a")[0].upper()})
+
         st.session_state.update({
             "_dash_computed_key": _dash_key,
             "_dash_ctl_vals": _ctl_vals, "_dash_atl_vals": _atl_vals, "_dash_tsb_vals": _tsb_vals,
@@ -2779,6 +2946,8 @@ if st.session_state.mob_menu == "dashboard":
             "_dash_w7_hrs": _w7_hrs, "_dash_w7_km": _w7_km, "_dash_w7_elev": _w7_elev,
             "_dash_w7_tss": _w7_tss, "_dash_w7_n": _w7_n, "_dash_w7_kcal": _w7_kcal,
             "_dash_sport_icons": _sport_icons,
+            "_dash_w7_deltas": _w7_deltas,
+            "_dash_daily_dots": _daily_dots,
         })
 
     # Leggi valori dalla cache
@@ -2800,6 +2969,8 @@ if st.session_state.mob_menu == "dashboard":
     _w7_n        = st.session_state["_dash_w7_n"]
     _w7_kcal     = st.session_state["_dash_w7_kcal"]
     _sport_icons = st.session_state["_dash_sport_icons"]
+    _w7_deltas   = st.session_state.get("_dash_w7_deltas", [None]*6)
+    _daily_dots  = st.session_state.get("_dash_daily_dots", [])
 
     def _spark_card(val_str, label, sub, color, delta_html, svg):
         return (
@@ -2818,11 +2989,18 @@ if st.session_state.mob_menu == "dashboard":
     _card_tsb = _spark_card(f"{current_tsb:+.0f}", "TSB", "Forma", tsb_color, _dh_tsb, _svg_tsb)
     _card_atl = _spark_card(f"{current_atl:.0f}", "ATL", "Fatica", atl_color, _dh_atl, _svg_atl)
 
+    _src_badge = (
+        f'<span style="background:rgba(0,0,0,0.25);border-radius:8px;padding:2px 8px;'
+        f'font-size:10px;font-weight:700;color:{_fitness_color};letter-spacing:0.3px">'
+        f'● {_fitness_source}</span>'
+    )
     st.markdown(
         f'<div class="hero-card">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
         f'<div style="font-size:11px;color:rgba(255,255,255,0.5);font-weight:700;'
-        f'letter-spacing:0.6px;text-transform:uppercase;margin-bottom:12px">'
-        f'📈 Performance Management</div>'
+        f'letter-spacing:0.6px;text-transform:uppercase">📈 Performance Management</div>'
+        f'{_src_badge}'
+        f'</div>'
         f'<div style="display:flex;gap:8px;margin-bottom:12px">'
         + _card_ctl + _card_tsb + _card_atl +
         f'</div>'
@@ -2839,26 +3017,74 @@ if st.session_state.mob_menu == "dashboard":
     )
 
     _w7_metrics = [
-        ("⏱", f"{_w7_hrs:.1f}h",         "ore attività",   "#3B82F6", "#EFF6FF"),
-        ("📏", f"{_w7_km:.0f}",           "km totali",      "#10B981", "#ECFDF5"),
-        ("⛰",  f"{_w7_elev/1000:.1f}k",  "metri D+",       "#8B5CF6", "#F5F3FF"),
-        ("🔥", f"{_w7_kcal:.0f}",         "kcal",           "#F97316", "#FFF7ED"),
-        ("📊", f"{_w7_tss:.0f}",          "TSS",            "#1A56DB", "#EFF6FF"),
-        ("🏅", f"{_w7_n}",                f"sessioni",       "#0F2744", "#F1F5F9"),
+        ("⏱", f"{_w7_hrs:.1f}h",         "ore",   "#3B82F6", "#EFF6FF"),
+        ("📏", f"{_w7_km:.0f}",           "km",    "#10B981", "#ECFDF5"),
+        ("⛰",  f"{_w7_elev/1000:.1f}k",  "D+",    "#8B5CF6", "#F5F3FF"),
+        ("🔥", f"{_w7_kcal:.0f}",         "kcal",  "#F97316", "#FFF7ED"),
+        ("📊", f"{_w7_tss:.0f}",          "TSS",   "#1A56DB", "#EFF6FF"),
+        ("🏅", f"{_w7_n}",                "sess.", "#0F2744", "#F1F5F9"),
     ]
+
+    def _delta_badge(pct):
+        if pct is None:
+            return '<span style="font-size:10px;color:#aaa">—</span>'
+        arrow = "↑" if pct >= 0 else "↓"
+        color = "#16A34A" if pct >= 0 else "#DC2626"
+        bg    = "#DCFCE7" if pct >= 0 else "#FEE2E2"
+        sign  = "+" if pct >= 0 else ""
+        return (
+            f'<span style="display:inline-block;background:{bg};color:{color};'
+            f'border-radius:6px;padding:1px 5px;font-size:10px;font-weight:700;line-height:1.4">'
+            f'{arrow}{sign}{pct:.0f}%</span>'
+        )
+
     _recap_html = (
         '<div class="mob-card" style="margin-top:8px">'
-        '<div class="mob-card-title">📆 Ultimi 7 giorni</div>'
+        '<div class="mob-card-title">📆 Ultimi 7 giorni'
+        ' · <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px">vs settimana precedente</span></div>'
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px">'
     )
-    for _ico, _val, _lbl, _mc, _mbg in _w7_metrics:
+    for _i, (_ico, _val, _lbl, _mc, _mbg) in enumerate(_w7_metrics):
+        _badge = _delta_badge(_w7_deltas[_i] if _i < len(_w7_deltas) else None)
         _recap_html += (
             f'<div style="background:{_mbg};border-radius:12px;padding:10px 8px;text-align:center">'
-            f'<div style="font-size:11px;color:{_mc};opacity:0.7;margin-bottom:3px;font-weight:600">{_ico} {_lbl}</div>'
-            f'<div style="font-size:22px;font-weight:900;color:{_mc};line-height:1">{_val}</div>'
+            f'<div style="font-size:10px;color:{_mc};opacity:0.7;margin-bottom:2px;font-weight:600">{_ico} {_lbl}</div>'
+            f'<div style="font-size:22px;font-weight:900;color:{_mc};line-height:1;margin-bottom:4px">{_val}</div>'
+            f'{_badge}'
             f'</div>'
         )
-    _recap_html += '</div></div>'
+    _recap_html += '</div>'
+
+    if _daily_dots:
+        _days_html = (
+            '<div style="display:flex;justify-content:space-between;align-items:center;'
+            'margin-top:12px;padding-top:10px;border-top:1px solid #f0f0f0">'
+        )
+        for _dot in _daily_dots:
+            _is_today = (_dot == _daily_dots[-1])
+            _outline  = "2px solid #1A56DB" if _is_today else "none"
+            if _dot["color"]:
+                _dot_html = (
+                    f'<div style="display:flex;flex-direction:column;align-items:center;gap:3px">'
+                    f'<div style="width:30px;height:30px;border-radius:50%;background:{_dot["color"]};'
+                    f'display:flex;align-items:center;justify-content:center;font-size:14px;'
+                    f'outline:{_outline};outline-offset:1px">{_dot["icon"]}</div>'
+                    f'<span style="font-size:9px;color:#94A3B8;font-weight:600">{_dot["label"]}</span>'
+                    f'</div>'
+                )
+            else:
+                _dot_html = (
+                    f'<div style="display:flex;flex-direction:column;align-items:center;gap:3px">'
+                    f'<div style="width:30px;height:30px;border-radius:50%;background:#E2E8F0;'
+                    f'outline:{_outline};outline-offset:1px"></div>'
+                    f'<span style="font-size:9px;color:#CBD5E1;font-weight:600">{_dot["label"]}</span>'
+                    f'</div>'
+                )
+            _days_html += _dot_html
+        _days_html += '</div>'
+        _recap_html += _days_html
+
+    _recap_html += '</div>'
     st.markdown(_recap_html, unsafe_allow_html=True)
 
     # ── Briefing giornaliero ──
@@ -3464,8 +3690,11 @@ elif st.session_state.mob_menu == "chat":
     @keyframes bounce { 0%,80%,100%{transform:scale(0.7);opacity:0.5} 40%{transform:scale(1);opacity:1} }
     .qp-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px 12px 0; }
     div[data-testid="stChatInput"] {
-        position:sticky !important; bottom:150px !important;
-        background:#f0f2f6 !important; padding:8px 0 4px !important; z-index:998 !important;
+        position:fixed !important; bottom:110px !important;
+        left:0 !important; right:0 !important;
+        background:#f0f2f6 !important; padding:8px 12px 4px !important;
+        z-index:9999 !important;
+        box-shadow:0 -2px 8px rgba(0,0,0,0.06) !important;
     }
     /* Piano strutturato */
     .plan-day {
@@ -3782,6 +4011,75 @@ elif st.session_state.mob_menu == "profilo":
         </div>""", unsafe_allow_html=True)
 
     # ── Selettore modello AI ──
+    # ── Card intervals.icu ──
+    st.markdown('<div class="mob-card"><div class="mob-card-title">📊 Intervals.icu — Fitness reale</div>',
+                unsafe_allow_html=True)
+    if INTERVALS_API_KEY:
+        _icu_d = st.session_state.get("_icu_fitness_data")
+        if _icu_d:
+            _ictl = _icu_d["ctl"]
+            _iatl = _icu_d["atl"]
+            _itsb = _icu_d["tsb"]
+            _iramp = _icu_d.get("ramp_rate")
+            _ramp_str = f"{_iramp:+.1f}/giorno" if _iramp else "—"
+            _icu_w = _icu_d.get("wellness", {})
+            _ihrv  = _icu_w.get("hrv") or _icu_w.get("avgHrv")
+            _iweight = _icu_w.get("weight")
+            _iresthr = _icu_w.get("restingHR")
+            st.markdown(f"""
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+              <div style="background:#ECFDF5;border-radius:12px;padding:12px 8px;text-align:center">
+                <div style="font-size:10px;color:#16A34A;font-weight:700;margin-bottom:2px">CTL fitness</div>
+                <div style="font-size:30px;font-weight:900;color:#15803D;line-height:1">{_ictl:.0f}</div>
+              </div>
+              <div style="background:#FFF7ED;border-radius:12px;padding:12px 8px;text-align:center">
+                <div style="font-size:10px;color:#C2410C;font-weight:700;margin-bottom:2px">ATL fatica</div>
+                <div style="font-size:30px;font-weight:900;color:#EA580C;line-height:1">{_iatl:.0f}</div>
+              </div>
+              <div style="background:#EFF6FF;border-radius:12px;padding:12px 8px;text-align:center">
+                <div style="font-size:10px;color:#1D4ED8;font-weight:700;margin-bottom:2px">TSB forma</div>
+                <div style="font-size:30px;font-weight:900;color:#1D4ED8;line-height:1">{_itsb:+.0f}</div>
+              </div>
+              <div style="background:#F5F3FF;border-radius:12px;padding:12px 8px;text-align:center">
+                <div style="font-size:10px;color:#7C3AED;font-weight:700;margin-bottom:2px">Ramp rate</div>
+                <div style="font-size:18px;font-weight:800;color:#7C3AED;line-height:1;margin-top:4px">{_ramp_str}</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+              {"" if not _ihrv else f'<span style="background:#FDF4FF;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:600;color:#7E22CE">HRV {_ihrv:.0f}</span>'}
+              {"" if not _iweight else f'<span style="background:#F0FDF4;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:600;color:#15803D">⚖️ {_iweight:.1f} kg</span>'}
+              {"" if not _iresthr else f'<span style="background:#FEF2F2;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:600;color:#DC2626">❤️ FC {_iresthr:.0f}</span>'}
+            </div>
+            <div style="font-size:11px;color:#10B981;font-weight:600">✅ Connesso a intervals.icu</div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Chiave configurata ma nessun dato. Verifica INTERVALS_API_KEY e INTERVALS_ATHLETE_ID nei Secrets.")
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            if st.button("🔄 Aggiorna", use_container_width=True, key="refresh_icu"):
+                for k in [k for k in st.session_state if k.startswith("_icu_")]:
+                    del st.session_state[k]
+                fetch_intervals_wellness.clear()
+                fetch_intervals_wellness_range.clear()
+                st.rerun()
+        with col_r2:
+            if st.button("🧹 Svuota cache", use_container_width=True, key="clear_icu"):
+                for k in [k for k in st.session_state if k.startswith("_icu_")]:
+                    del st.session_state[k]
+                st.rerun()
+    else:
+        st.markdown("""
+        <div style="font-size:12px;color:#64748B;line-height:1.8;padding:4px 0">
+        ⚪ <b>Non configurato.</b> Per ottenere CTL/ATL/TSB identici a Garmin e Sunto:<br>
+        1. Vai su <b>intervals.icu → Settings → Developer Settings</b><br>
+        2. Genera la tua <b>API Key</b><br>
+        3. Nei Secrets Streamlit aggiungi:<br>
+        &nbsp;&nbsp;<code style="background:#f1f5f9;padding:1px 5px;border-radius:4px">INTERVALS_API_KEY = "la_tua_chiave"</code><br>
+        &nbsp;&nbsp;<code style="background:#f1f5f9;padding:1px 5px;border-radius:4px">INTERVALS_ATHLETE_ID = "0"</code>
+        </div>
+        """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown('<div class="mob-card"><div class="mob-card-title">🤖 Modello AI</div>',
                 unsafe_allow_html=True)
     # Riscovery dinamica se richiesta
