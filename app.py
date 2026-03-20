@@ -629,6 +629,113 @@ def fetch_intervals_wellness_range(athlete_id: str, api_key: str, oldest: str, n
         return []
 
 
+@st.cache_data(ttl=900)
+def fetch_intervals_activities_page(athlete_id: str, api_key: str, oldest: str, newest: str):
+    """Fetch una pagina di attività da intervals.icu."""
+    if not api_key or not athlete_id:
+        return []
+    try:
+        import base64 as _b64
+        token = _b64.b64encode(f"API_KEY:{api_key}".encode()).decode()
+        url   = f"https://intervals.icu/api/v1/athlete/{athlete_id}/activities"
+        resp  = requests.get(url, headers={"Authorization": f"Basic {token}"},
+                             params={"oldest": oldest, "newest": newest}, timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+        st.session_state["_icu_acts_error"] = f"HTTP {resp.status_code}: {resp.text[:120]}"
+        return []
+    except Exception as e:
+        st.session_state["_icu_acts_error"] = str(e)
+        return []
+
+
+def load_all_from_intervals(athlete_id: str, api_key: str):
+    """
+    Scarica tutta la storia attività da intervals.icu a finestre di 6 mesi.
+    Mappa i campi intervals.icu → struttura compatibile con il DataFrame esistente.
+    Campi chiave intervals.icu:
+      id, start_date_local, type, moving_time, distance, total_elevation_gain,
+      average_heartrate, max_heartrate, average_watts, icu_weighted_avg_watts (NP),
+      icu_training_load (TSS reale!), icu_ftp, name, calories, average_cadence,
+      icu_power_zone (zona dominante), max_watts
+    """
+    from datetime import date
+    all_acts = []
+    # Parti da oggi e vai indietro a finestre da 6 mesi finché non trovi attività
+    end   = datetime.now(timezone.utc).date()
+    # Vai indietro fino a 10 anni (ma smette prima se non trova nulla)
+    max_years = 10
+    empty_windows = 0
+
+    for _ in range(max_years * 2):  # finestre da 6 mesi
+        start = end - timedelta(days=180)
+        batch = fetch_intervals_activities_page(
+            athlete_id, api_key,
+            start.strftime("%Y-%m-%d"),
+            end.strftime("%Y-%m-%d")
+        )
+        if batch:
+            all_acts.extend(batch)
+            empty_windows = 0
+        else:
+            empty_windows += 1
+            if empty_windows >= 2:  # 2 finestre vuote consecutive → fine storia
+                break
+        end = start - timedelta(days=1)
+        if end.year < 2010:
+            break
+
+    return all_acts
+
+
+def normalize_intervals_activity(act: dict) -> dict:
+    """
+    Converte un'attività intervals.icu nel formato usato dal DataFrame.
+    Preserva i campi Strava-compatibili e aggiunge quelli intervals.icu.
+    """
+    # TSS reale da intervals.icu (icu_training_load è il TSS calcolato da intervals)
+    tss_real = act.get("icu_training_load") or act.get("training_load")
+
+    # Normalized Power da intervals.icu
+    np_watts = act.get("icu_weighted_avg_watts")
+
+    # FTP usato per questa attività da intervals.icu
+    act_ftp  = act.get("icu_ftp")
+
+    # Mappa tipo sport: intervals.icu usa gli stessi tipi Strava
+    sport_type = act.get("type", "Workout")
+
+    return {
+        # Campi base compatibili con il df esistente
+        "id":                    act.get("id", ""),
+        "name":                  act.get("name", ""),
+        "type":                  sport_type,
+        "start_date_local":      act.get("start_date_local", ""),
+        "moving_time":           act.get("moving_time") or 0,
+        "distance":              act.get("distance") or 0,
+        "total_elevation_gain":  act.get("total_elevation_gain") or 0,
+        "average_heartrate":     act.get("average_heartrate"),
+        "max_heartrate":         act.get("max_heartrate"),
+        "average_watts":         act.get("average_watts"),
+        "max_watts":             act.get("max_watts"),
+        "average_cadence":       act.get("average_cadence"),
+        "calories":              act.get("calories"),
+        "kilojoules":            act.get("kilojoules"),
+        "suffer_score":          act.get("suffer_score"),
+        # Campi extra intervals.icu
+        "icu_training_load":     tss_real,       # TSS reale
+        "icu_weighted_avg_watts": np_watts,       # NP
+        "icu_ftp":               act_ftp,         # FTP al momento dell'attività
+        "icu_power_zone":        act.get("icu_power_zone"),
+        # Polyline GPS: non disponibile da intervals.icu → verrà fetchato da Strava on-demand
+        "map":                   act.get("map", {}),
+        # Strava ID per fetch GPS on-demand (intervals.icu lo espone come external_id o strava_id)
+        "strava_id":             act.get("strava_id") or act.get("external_id", ""),
+        # Flag sorgente
+        "_source": "intervals.icu",
+    }
+
+
 def get_intervals_fitness(athlete_id: str, api_key: str):
     """
     Entry point principale. Ritorna dict con ctl, atl, tsb, ramp_rate, history (30gg).
@@ -2217,7 +2324,7 @@ if not token_ok:
     st.stop()
 
 # ============================================================
-# DATI STRAVA + GSHEET CACHE
+# DATI: intervals.icu (attività) + Strava (GPS on-demand)
 # ============================================================
 access_token = st.session_state.strava_token_info["access_token"]
 athlete      = fetch_athlete(access_token)
@@ -2235,58 +2342,119 @@ if _gsheet_ok and not st.session_state.get("_profile_loaded"):
     st.session_state["_profile_loaded"] = True
 
 if not st.session_state.activities_cache:
-    # Prima prova dal Google Sheet
-    if _gsheet_ok and not st.session_state.gsheet_loaded:
-        with st.spinner("📊 Carico storico dalla cache..."):
-            sheet_data = gsheet_load_activities()
-        if sheet_data:
-            st.session_state.activities_cache = sheet_data
-            st.session_state.gsheet_loaded    = True
-            # Controlla se serve aggiornamento da Strava
-            if gsheet_needs_sync():
-                st.toast("🔄 Aggiorno con le ultime attività da Strava...", icon="⏳")
-                # Trova timestamp più recente nella cache
-                _dates = []
-                for a in sheet_data:
-                    try:
-                        d = datetime.fromisoformat(str(a.get("start_date","")).replace("Z",""))
-                        _dates.append(int(d.timestamp()))
-                    except Exception:
-                        pass
-                _last_ts = max(_dates) if _dates else 0
-                new_acts = load_new_from_strava(access_token, after_ts=_last_ts)
-                if new_acts:
-                    existing_ids = {a["id"] for a in sheet_data}
-                    added = [a for a in new_acts if a["id"] not in existing_ids]
-                    if added:
-                        merged = sheet_data + added
-                        st.session_state.activities_cache = merged
-                        gsheet_save_activities(merged)
-                        st.toast(f"✅ {len(added)} nuove attività sincronizzate", icon="🏃")
+    if INTERVALS_API_KEY and INTERVALS_ATHLETE_ID:
+        # ── Fonte primaria: intervals.icu ──
+        # Prima prova dalla cache GSheet
+        if _gsheet_ok and not st.session_state.gsheet_loaded:
+            with st.spinner("📊 Carico storico dalla cache..."):
+                sheet_data = gsheet_load_activities()
+            if sheet_data:
+                # Controlla se i dati sono già da intervals.icu o da Strava (vecchi)
+                _sample = sheet_data[0] if sheet_data else {}
+                _is_icu = _sample.get("_source") == "intervals.icu"
+                if _is_icu:
+                    st.session_state.activities_cache = sheet_data
+                    st.session_state.gsheet_loaded    = True
+                    # Aggiornamento incrementale: prendi le nuove da intervals.icu
+                    if gsheet_needs_sync():
+                        st.toast("🔄 Aggiorno con le ultime attività da intervals.icu...", icon="⏳")
+                        _dates_icu = []
+                        for a in sheet_data:
+                            try:
+                                d = datetime.fromisoformat(str(a.get("start_date_local","")).replace("Z",""))
+                                _dates_icu.append(d.date())
+                            except Exception:
+                                pass
+                        _last_date = max(_dates_icu) if _dates_icu else (datetime.now().date() - timedelta(days=365))
+                        _newest    = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
+                        _oldest    = (_last_date - timedelta(days=3)).strftime("%Y-%m-%d")  # 3gg overlap sicurezza
+                        _new_raw   = fetch_intervals_activities_page(
+                            INTERVALS_ATHLETE_ID, INTERVALS_API_KEY, _oldest, _newest)
+                        if _new_raw:
+                            _new_norm     = [normalize_intervals_activity(a) for a in _new_raw]
+                            _existing_ids = {a["id"] for a in sheet_data}
+                            _added        = [a for a in _new_norm if a["id"] not in _existing_ids]
+                            if _added:
+                                merged = sheet_data + _added
+                                st.session_state.activities_cache = merged
+                                gsheet_save_activities(merged)
+                                st.toast(f"✅ {len(_added)} nuove attività sincronizzate da intervals.icu", icon="🏃")
+                            else:
+                                gsheet_save_activities(sheet_data)
                 else:
-                    # Solo aggiorna timestamp sync
-                    gsheet_save_activities(sheet_data)
+                    # Cache contiene dati Strava → ricarica tutto da intervals.icu
+                    st.toast("🔄 Migrazione dati a intervals.icu in corso...", icon="⏳")
+                    with st.spinner("⏳ Carico storico completo da intervals.icu (prima volta, 30-60s)..."):
+                        _icu_raw  = load_all_from_intervals(INTERVALS_ATHLETE_ID, INTERVALS_API_KEY)
+                    if _icu_raw:
+                        _icu_norm = [normalize_intervals_activity(a) for a in _icu_raw]
+                        st.session_state.activities_cache = _icu_norm
+                        st.session_state.gsheet_loaded    = True
+                        if _gsheet_ok:
+                            with st.spinner("💾 Salvo in cache persistente..."):
+                                gsheet_save_activities(_icu_norm)
+                        st.toast(f"✅ {len(_icu_norm)} attività migrate da intervals.icu", icon="🏃")
+            else:
+                # Nessuna cache → carica tutto da intervals.icu
+                with st.spinner("⏳ Carico storico completo da intervals.icu (prima volta, 30-60s)..."):
+                    _icu_raw = load_all_from_intervals(INTERVALS_ATHLETE_ID, INTERVALS_API_KEY)
+                if _icu_raw:
+                    _icu_norm = [normalize_intervals_activity(a) for a in _icu_raw]
+                    st.session_state.activities_cache = _icu_norm
+                    st.session_state.gsheet_loaded    = True
+                    if _gsheet_ok:
+                        with st.spinner("💾 Salvo in cache persistente..."):
+                            gsheet_save_activities(_icu_norm)
+                    st.toast(f"✅ {len(_icu_norm)} attività caricate da intervals.icu", icon="🏃")
         else:
-            # Nessun dato nel sheet → carica tutto da Strava
-            with st.spinner("⏳ Primo caricamento storico da Strava (30-60 sec)..."):
+            # Nessun GSheet → carica direttamente da intervals.icu
+            with st.spinner("⏳ Carico storico da intervals.icu..."):
+                _icu_raw = load_all_from_intervals(INTERVALS_ATHLETE_ID, INTERVALS_API_KEY)
+            if _icu_raw:
+                _icu_norm = [normalize_intervals_activity(a) for a in _icu_raw]
+                st.session_state.activities_cache = _icu_norm
+                st.toast(f"✅ {len(_icu_norm)} attività caricate da intervals.icu", icon="🏃")
+    else:
+        # ── Fallback: Strava (se intervals.icu non configurato) ──
+        if _gsheet_ok and not st.session_state.gsheet_loaded:
+            with st.spinner("📊 Carico storico dalla cache..."):
+                sheet_data = gsheet_load_activities()
+            if sheet_data:
+                st.session_state.activities_cache = sheet_data
+                st.session_state.gsheet_loaded    = True
+                if gsheet_needs_sync():
+                    st.toast("🔄 Aggiorno da Strava...", icon="⏳")
+                    _dates = []
+                    for a in sheet_data:
+                        try:
+                            d = datetime.fromisoformat(str(a.get("start_date","")).replace("Z",""))
+                            _dates.append(int(d.timestamp()))
+                        except Exception:
+                            pass
+                    _last_ts = max(_dates) if _dates else 0
+                    new_acts = load_new_from_strava(access_token, after_ts=_last_ts)
+                    if new_acts:
+                        existing_ids = {a["id"] for a in sheet_data}
+                        added = [a for a in new_acts if a["id"] not in existing_ids]
+                        if added:
+                            merged = sheet_data + added
+                            st.session_state.activities_cache = merged
+                            gsheet_save_activities(merged)
+            else:
+                with st.spinner("⏳ Primo caricamento da Strava (30-60 sec)..."):
+                    raw = load_all_from_strava(access_token)
+                st.session_state.activities_cache = raw
+                st.session_state.gsheet_loaded    = True
+                if _gsheet_ok and raw:
+                    gsheet_save_activities(raw)
+        else:
+            with st.spinner("⏳ Carico da Strava..."):
                 raw = load_all_from_strava(access_token)
             st.session_state.activities_cache = raw
-            st.session_state.gsheet_loaded    = True
-            if _gsheet_ok and raw:
-                with st.spinner("💾 Salvo in cache persistente..."):
-                    gsheet_save_activities(raw)
-                st.toast(f"✅ {len(raw)} attività caricate e salvate", icon="🏃")
-    else:
-        # Nessun GSheet configurato → carica da Strava direttamente
-        with st.spinner("⏳ Carico storico da Strava..."):
-            raw = load_all_from_strava(access_token)
-        st.session_state.activities_cache = raw
-        if raw:
-            st.toast(f"✅ {len(raw)} attività caricate", icon="🏃")
 
 raw = st.session_state.activities_cache
 if not raw:
-    st.error("Impossibile recuperare le attività da Strava.")
+    st.error("Impossibile recuperare le attività. Verifica la configurazione di intervals.icu o Strava.")
     st.stop()
 
 u = st.session_state.user_data
@@ -2312,8 +2480,17 @@ if st.session_state.get("_df_cache_key") != _df_cache_key:
         else:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # TSS vettorizzato (era apply() riga per riga)
-    df["tss"] = calc_tss_vectorized(df, u)
+    # TSS: usa icu_training_load da intervals.icu se disponibile, altrimenti calcola
+    if "icu_training_load" in df.columns:
+        _icu_tss = pd.to_numeric(df["icu_training_load"], errors="coerce")
+        _calc_tss = calc_tss_vectorized(df, u)
+        df["tss"] = _icu_tss.where(_icu_tss.notna() & (_icu_tss > 0), _calc_tss)
+    else:
+        df["tss"] = calc_tss_vectorized(df, u)
+
+    # NP (Normalized Power) da intervals.icu
+    if "icu_weighted_avg_watts" in df.columns:
+        df["normalized_power"] = pd.to_numeric(df["icu_weighted_avg_watts"], errors="coerce")
 
     # Fix: sci alpino su pista → dislivello zero (funivia conta come salita GPS)
     # Fatto sul DataFrame così l'AI riceve dati corretti in tutti i contesti
@@ -4190,13 +4367,23 @@ elif st.session_state.mob_menu == "profilo":
             <span style="font-size:11px;color:#888">Aggiornamento auto ogni 24h</span>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("🔄 Forza sync da Strava", use_container_width=True):
+        _sync_label = "🔄 Forza sync da intervals.icu" if (INTERVALS_API_KEY and INTERVALS_ATHLETE_ID) else "🔄 Forza sync da Strava"
+        if st.button(_sync_label, use_container_width=True):
             with st.spinner("Sincronizzazione in corso..."):
-                raw_new = load_all_from_strava(access_token)
+                if INTERVALS_API_KEY and INTERVALS_ATHLETE_ID:
+                    _raw_new = load_all_from_intervals(INTERVALS_ATHLETE_ID, INTERVALS_API_KEY)
+                    raw_new  = [normalize_intervals_activity(a) for a in _raw_new] if _raw_new else []
+                else:
+                    raw_new = load_all_from_strava(access_token)
                 if raw_new:
                     st.session_state.activities_cache = raw_new
+                    # Invalida cache df
+                    for k in ["_df_cache_key","_df_cached","_ctl_daily","_atl_daily",
+                              "_tsb_daily","_tss_daily","_vo2max_val"]:
+                        st.session_state.pop(k, None)
+                    fetch_intervals_activities_page.clear()
                     gsheet_save_activities(raw_new)
-                    st.success(f"✅ {len(raw_new)} attività salvate!")
+                    st.success(f"✅ {len(raw_new)} attività sincronizzate!")
                     st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
